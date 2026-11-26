@@ -208,6 +208,8 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
 
       final screenTitle = isBusiness ? 'Corporate Shipper Verification (KYB)' : 'Shipper Identity Verification (KYC)';
       final isWide = SiteLayout.isWideScreen(context);
+      final dark = Theme.of(context).brightness == Brightness.dark;
+      final businessAccent = dark ? const Color(0xFF38BDF8) : const Color(0xFF0F172A);
 
       return AppPageLayout(
         title: screenTitle,
@@ -233,12 +235,12 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: isBusiness
-                      ? const Color(0xFF0F172A).withValues(alpha: 0.05)
+                      ? businessAccent.withValues(alpha: dark ? 0.12 : 0.05)
                       : AvailColors.primary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
                     color: isBusiness
-                        ? const Color(0xFF0F172A).withValues(alpha: 0.2)
+                        ? businessAccent.withValues(alpha: dark ? 0.35 : 0.2)
                         : AvailColors.primary.withValues(alpha: 0.3),
                   ),
                 ),
@@ -247,7 +249,9 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: isBusiness ? const Color(0xFF0F172A) : AvailColors.primary,
+                        color: isBusiness
+                            ? (dark ? const Color(0xFF0284C7) : const Color(0xFF0F172A))
+                            : AvailColors.primary,
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
@@ -270,7 +274,7 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 13,
-                                    color: isBusiness ? const Color(0xFF0F172A) : AvailColors.primary,
+                                    color: isBusiness ? businessAccent : AvailColors.primary,
                                   ),
                                 ),
                               ),
@@ -297,17 +301,21 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
                             isBusiness
                                 ? 'Company: ${user.companyName.isNotEmpty ? user.companyName : "Corporate Business"}'
                                 : 'Shipper: ${user.fullName.isNotEmpty ? user.fullName : "Individual Account"}',
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: dark ? Colors.white : const Color(0xFF334155),
+                            ),
                           ),
                           if (isBusiness && user.registrationNumber.isNotEmpty)
                             Text(
                               'Tax ID / Reg No: ${user.registrationNumber}',
-                              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                              style: TextStyle(fontSize: 11, color: dark ? Colors.grey.shade400 : Colors.grey.shade600),
                             ),
                           if (!isBusiness && user.idDocumentNumber.isNotEmpty)
                             Text(
                               '${user.idDocumentType}: ${user.idDocumentNumber}',
-                              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                              style: TextStyle(fontSize: 11, color: dark ? Colors.grey.shade400 : Colors.grey.shade600),
                             ),
                           const SizedBox(height: 8),
                           // Profile verification badge (Single track for user's account type)
@@ -611,6 +619,7 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
   }) {
     final bool hasDocs = user.hasSubmittedKycDocs;
     final bool showForm = !hasDocs || _isEditingDocs;
+    final dark = Theme.of(context).brightness == Brightness.dark;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -618,9 +627,13 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
+            Text(
               'Shipper KYC Verification Flow',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A)),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: dark ? Colors.white : const Color(0xFF0F172A),
+              ),
             ),
             if (hasDocs && !isAdminApproved)
               TextButton.icon(
@@ -667,6 +680,7 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
   }) {
     final bool hasDocs = user.hasSubmittedKycDocs;
     final bool showForm = !hasDocs || _isEditingDocs;
+    final dark = Theme.of(context).brightness == Brightness.dark;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -674,9 +688,13 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
+            Text(
               'Corporate KYB Verification Flow',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A)),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: dark ? Colors.white : const Color(0xFF0F172A),
+              ),
             ),
             if (hasDocs && !isAdminApproved)
               TextButton.icon(
@@ -715,12 +733,13 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
 
   /// Individual Credentials Input Form
   Widget _buildIndividualCredentialsForm(BuildContext context, {required VerificationController controller}) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: dark ? const Color(0xFF132238) : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: dark ? const Color(0xFF1E3A5F) : Colors.grey.shade200),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 3)),
         ],
@@ -750,7 +769,7 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
             const SizedBox(height: 6),
             Text(
               'Enter your official government ID details exactly as printed on your card/passport.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: dark ? Colors.grey.shade400 : Colors.grey.shade600),
             ),
             const SizedBox(height: 14),
 
@@ -864,11 +883,12 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
 
   /// Individual Credentials Summary Card
   Widget _buildDeclaredCredentialsSummary(BuildContext context, {required UserAccountModel user}) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: dark ? const Color(0xFF132238) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.green.shade200),
         boxShadow: [
@@ -882,7 +902,7 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
             children: [
               Container(
                 padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(color: Colors.green.shade50, shape: BoxShape.circle),
+                decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.14), shape: BoxShape.circle),
                 child: const Icon(Iconsax.tick_circle, color: Colors.green, size: 18),
               ),
               const SizedBox(width: 8),
@@ -904,12 +924,14 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
 
   /// Business Credentials Input Form
   Widget _buildBusinessCredentialsForm(BuildContext context, {required VerificationController controller}) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final businessIconColor = dark ? const Color(0xFF38BDF8) : const Color(0xFF0F172A);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: dark ? const Color(0xFF132238) : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: dark ? const Color(0xFF1E3A5F) : Colors.grey.shade200),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 3)),
         ],
@@ -924,10 +946,10 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0F172A).withValues(alpha: 0.1),
+                    color: businessIconColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Iconsax.buildings, color: Color(0xFF0F172A), size: 20),
+                  child: Icon(Iconsax.buildings, color: businessIconColor, size: 20),
                 ),
                 const SizedBox(width: 10),
                 const Text(
@@ -939,7 +961,7 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
             const SizedBox(height: 6),
             Text(
               'Input your company registration and tax details for Corporate KYB validation.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: dark ? Colors.grey.shade400 : Colors.grey.shade600),
             ),
             const SizedBox(height: 14),
 
@@ -981,7 +1003,7 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
               child: ElevatedButton.icon(
                 onPressed: _isSavingDocs ? null : () => _saveBusinessDocs(controller),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0F172A),
+                  backgroundColor: dark ? AvailColors.primary : const Color(0xFF0F172A),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
@@ -1002,11 +1024,12 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
 
   /// Business Credentials Summary Card
   Widget _buildDeclaredBusinessSummary(BuildContext context, {required UserAccountModel user}) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: dark ? const Color(0xFF132238) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.green.shade200),
         boxShadow: [
@@ -1020,7 +1043,7 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
             children: [
               Container(
                 padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(color: Colors.green.shade50, shape: BoxShape.circle),
+                decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.14), shape: BoxShape.circle),
                 child: const Icon(Iconsax.tick_circle, color: Colors.green, size: 18),
               ),
               const SizedBox(width: 8),
@@ -1047,14 +1070,19 @@ class _DiditVerificationScreenState extends State<DiditVerificationScreen> {
     required bool isKycVerified,
     required bool isBusiness,
   }) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: dark ? const Color(0xFF132238) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isKycVerified ? Colors.green.shade300 : (hasDocs ? AvailColors.primary.withValues(alpha: 0.4) : Colors.grey.shade300),
+          color: isKycVerified
+              ? Colors.green.shade300
+              : (hasDocs
+                  ? AvailColors.primary.withValues(alpha: 0.4)
+                  : (dark ? const Color(0xFF1E3A5F) : Colors.grey.shade300)),
         ),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 3)),

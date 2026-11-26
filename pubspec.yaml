@@ -82,12 +82,15 @@ dev_dependencies:
 # Native Splash Screen Configuration
 flutter_native_splash:
   color: "#FFFFFF"
-  color_dark: "#1F1F1F"
+  color_dark: "#FFFFFF"
   image: assets/logos/launch_logo.png
   image_dark: assets/logos/launch_logo.png
+  fullscreen: false
+  android_gravity: center
+  ios_content_mode: center
   android_12:
     color: "#FFFFFF"
-    color_dark: "#1F1F1F"
+    color_dark: "#FFFFFF"
     image: assets/logos/launch_logo.png
     image_dark: assets/logos/launch_logo.png
   android: true

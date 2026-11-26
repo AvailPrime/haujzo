@@ -28,64 +28,67 @@ class VerifyEmailScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: MaxWidthContainer(
-        maxWidth: 500,
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(AvailSizes.defaultspace),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                /// Image
-                const Center(
-                  child: SizedBox(
-                    height: 200,
-                    child: Image(
-                      image: AssetImage(AvailImages.deliveredEmailIllustration),
-                      width: 240,
-                      fit: BoxFit.contain,
+      body: SafeArea(
+        top: false,
+        child: MaxWidthContainer(
+          maxWidth: 500,
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(AvailSizes.defaultspace),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  /// Image
+                  const Center(
+                    child: SizedBox(
+                      height: 200,
+                      child: Image(
+                        image: AssetImage(AvailImages.deliveredEmailIllustration),
+                        width: 240,
+                        fit: BoxFit.contain,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: AvailSizes.spacebtwsections),
+                  const SizedBox(height: AvailSizes.spacebtwsections),
 
-                /// Title & Subtitle
-                Text(
-                  AvailTexts.confirmEmail,
-                  style: Theme.of(context).textTheme.headlineMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: AvailSizes.spacebtwitems),
-                Text(
-                  email ?? '',
-                  style: Theme.of(context).textTheme.bodySmall,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: AvailSizes.spacebtwitems),
-                Text(
-                  AvailTexts.confirmEmailSubtitle,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: AvailSizes.spacebtwsections),
+                  /// Title & Subtitle
+                  Text(
+                    AvailTexts.confirmEmail,
+                    style: Theme.of(context).textTheme.headlineMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: AvailSizes.spacebtwitems),
+                  Text(
+                    email ?? '',
+                    style: Theme.of(context).textTheme.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: AvailSizes.spacebtwitems),
+                  Text(
+                    AvailTexts.confirmEmailSubtitle,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: AvailSizes.spacebtwsections),
 
-                /// Buttons
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () => controller.checkEmailVerificationStatus(),
-                    child: const Text(AvailTexts.aContinue),
+                  /// Buttons
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => controller.checkEmailVerificationStatus(),
+                      child: const Text(AvailTexts.aContinue),
+                    ),
                   ),
-                ),
-                const SizedBox(height: AvailSizes.spacebtwitems),
-                SizedBox(
-                  width: double.infinity,
-                  child: TextButton(
-                    onPressed: () => controller.sendEmailVerification(),
-                    child: const Text(AvailTexts.resendCode),
+                  const SizedBox(height: AvailSizes.spacebtwitems),
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton(
+                      onPressed: () => controller.sendEmailVerification(),
+                      child: const Text(AvailTexts.resendCode),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

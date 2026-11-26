@@ -49,9 +49,11 @@ class ChangePhoneNumber extends StatelessWidget {
           ],
         ),
       ),
-      body: MaxWidthContainer(
-        maxWidth: 540,
-        child: SingleChildScrollView(
+      body: SafeArea(
+        top: false,
+        child: MaxWidthContainer(
+          maxWidth: 540,
+          child: SingleChildScrollView(
           padding: const EdgeInsets.all(AvailSizes.defaultspace),
           child: Container(
             padding: const EdgeInsets.all(22),
@@ -168,6 +170,7 @@ class ChangePhoneNumber extends StatelessWidget {
             ),
           ),
         ),
+      ),
       ),
     );
   }

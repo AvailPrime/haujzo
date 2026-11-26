@@ -16,41 +16,10 @@ class OnBoardingScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = Get.put(OnBoardingController());
     return Scaffold(
-      body: SiteLayout(
-        mobile: Stack(
-          children: [
-            /// Horizontal Scrollable Page
-            PageView(
-              controller: controller.pageController,
-              onPageChanged: controller.updatePageIndicator,
-              children: const [
-                OnBoardingPage(
-                    image: AvailImages.onBoardingImage1,
-                    title: AvailTexts.onboardingtitle1,
-                    subtitle: AvailTexts.onboardingsubtitle1),
-                OnBoardingPage(
-                    image: AvailImages.onBoardingImage2,
-                    title: AvailTexts.onboardingtitle2,
-                    subtitle: AvailTexts.onboardingsubtitle2),
-                OnBoardingPage(
-                    image: AvailImages.onBoardingImage3,
-                    title: AvailTexts.onboardingtitle3,
-                    subtitle: AvailTexts.onboardingsubtitle3),
-              ],
-            ),
-
-            /// Skip Button
-            const OnBoardingSkip(),
-
-            /// Dot Navigation SmoothPageIndicator
-            const OnBoardingDotNavigation(),
-
-            /// Circulation Button
-            const OnBoardingNextButton()
-          ],
-        ),
-        desktop: MaxWidthContainer(
-          child: Stack(
+      body: SafeArea(
+        top: false,
+        child: SiteLayout(
+          mobile: Stack(
             children: [
               /// Horizontal Scrollable Page
               PageView(
@@ -81,6 +50,40 @@ class OnBoardingScreen extends StatelessWidget {
               /// Circulation Button
               const OnBoardingNextButton()
             ],
+          ),
+          desktop: MaxWidthContainer(
+            child: Stack(
+              children: [
+                /// Horizontal Scrollable Page
+                PageView(
+                  controller: controller.pageController,
+                  onPageChanged: controller.updatePageIndicator,
+                  children: const [
+                    OnBoardingPage(
+                        image: AvailImages.onBoardingImage1,
+                        title: AvailTexts.onboardingtitle1,
+                        subtitle: AvailTexts.onboardingsubtitle1),
+                    OnBoardingPage(
+                        image: AvailImages.onBoardingImage2,
+                        title: AvailTexts.onboardingtitle2,
+                        subtitle: AvailTexts.onboardingsubtitle2),
+                    OnBoardingPage(
+                        image: AvailImages.onBoardingImage3,
+                        title: AvailTexts.onboardingtitle3,
+                        subtitle: AvailTexts.onboardingsubtitle3),
+                  ],
+                ),
+
+                /// Skip Button
+                const OnBoardingSkip(),
+
+                /// Dot Navigation SmoothPageIndicator
+                const OnBoardingDotNavigation(),
+
+                /// Circulation Button
+                const OnBoardingNextButton()
+              ],
+            ),
           ),
         ),
       ),

@@ -13,43 +13,45 @@ class SuccessScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: AvailSpacingStyles.paddingWithAppBarHeight * 2,
-          child: Column(
-            children: [
-              /// Image
-              Center(
-                child: SizedBox(
-                  height: 200,
-                  child: Image(
-                    image: AssetImage(image),
-                    width: AvailHelperFunctions.screenWidth() * 0.6,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: AvailSpacingStyles.paddingWithAppBarHeight * 2,
+            child: Column(
+              children: [
+                /// Image
+                Center(
+                  child: SizedBox(
+                    height: 200,
+                    child: Image(
+                      image: AssetImage(image),
+                      width: AvailHelperFunctions.screenWidth() * 0.6,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: AvailSizes.spacebtwsections),
+                const SizedBox(height: AvailSizes.spacebtwsections),
 
-              /// Title & Subtitle
-              Text(
-                title,
-                style: Theme.of(context).textTheme.headlineMedium,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: AvailSizes.spacebtwitems),
-              Text(
-                subTitle,
-                style: Theme.of(context).textTheme.bodyMedium,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: AvailSizes.spacebtwsections),
+                /// Title & Subtitle
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.headlineMedium,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AvailSizes.spacebtwitems),
+                Text(
+                  subTitle,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AvailSizes.spacebtwsections),
 
-              /// Button
-              SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                      onPressed:onPressed, child: const Text(AvailTexts.aContinue))),
-            ],
+                /// Button
+                SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                        onPressed: onPressed, child: const Text(AvailTexts.aContinue))),
+              ],
+            ),
           ),
         ),
       ),

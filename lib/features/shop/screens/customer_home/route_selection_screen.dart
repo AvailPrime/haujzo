@@ -34,8 +34,12 @@ class _RouteSelectionScreenState extends State<RouteSelectionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = dark ? const Color(0xFF0A192F) : const Color(0xFFF8F9FA);
+    final circleBg = dark ? const Color(0xFF1E293B) : Colors.white;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      backgroundColor: bgColor,
       appBar: AppBar(
         backgroundColor: AvailColors.secondary,
         foregroundColor: Colors.white,
@@ -43,139 +47,142 @@ class _RouteSelectionScreenState extends State<RouteSelectionScreen> {
         title: const Text('DISPATCH ROUTE', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14, letterSpacing: 1.5)),
         leading: IconButton(icon: const Icon(Iconsax.arrow_left), onPressed: () => Get.back()),
       ),
-      body: Column(
-        children: [
-          // Industrial Route Input
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: const BoxDecoration(
-              color: AvailColors.secondary,
-              borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20), bottomRight: Radius.circular(20)),
-            ),
-            child: ResponsiveCenter(
-              maxWidth: 760,
-              child: Column(
-                children: [
-                _buildIndustrialInput(
-                  controller: pickupTextController,
-                  label: 'ORIGIN / PICKUP',
-                  icon: Iconsax.box,
-                  iconColor: Colors.blueAccent,
-                  isFocused: isSearchingPickup,
-                  onTap: () => setState(() { isSearchingPickup = true; isSearchingDestination = false; }),
-                  onChanged: (val) => searchController.findPlaceAutocomplete(val),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      InkWell(
-                        onTap: () {
-                          setState(() {
-                            final temp = pickupTextController.text;
-                            pickupTextController.text = destinationTextController.text;
-                            destinationTextController.text = temp;
-                            homeController.reverseRoute();
-                          });
-                        },
-                        borderRadius: BorderRadius.circular(20),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: Colors.white24),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Iconsax.arrow_swap_horizontal, color: AvailColors.primary, size: 14),
-                              SizedBox(width: 4),
-                              Text('SWAP', style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
-                            ],
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            // Industrial Route Input
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: const BoxDecoration(
+                color: AvailColors.secondary,
+                borderRadius: BorderRadius.only(bottomLeft: Radius.circular(20), bottomRight: Radius.circular(20)),
+              ),
+              child: ResponsiveCenter(
+                maxWidth: 760,
+                child: Column(
+                  children: [
+                  _buildIndustrialInput(
+                    controller: pickupTextController,
+                    label: 'ORIGIN / PICKUP',
+                    icon: Iconsax.box,
+                    iconColor: Colors.blueAccent,
+                    isFocused: isSearchingPickup,
+                    onTap: () => setState(() { isSearchingPickup = true; isSearchingDestination = false; }),
+                    onChanged: (val) => searchController.findPlaceAutocomplete(val),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        InkWell(
+                          onTap: () {
+                            setState(() {
+                              final temp = pickupTextController.text;
+                              pickupTextController.text = destinationTextController.text;
+                              destinationTextController.text = temp;
+                              homeController.reverseRoute();
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(20),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.white24),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Iconsax.arrow_swap_horizontal, color: AvailColors.primary, size: 14),
+                                SizedBox(width: 4),
+                                Text('SWAP', style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
+                  _buildIndustrialInput(
+                    controller: destinationTextController,
+                    label: 'DESTINATION / DROP-OFF',
+                    icon: Iconsax.location,
+                    iconColor: Colors.redAccent,
+                    isFocused: isSearchingDestination,
+                    onTap: () => setState(() { isSearchingPickup = false; isSearchingDestination = true; }),
+                    onChanged: (val) => searchController.findPlaceAutocomplete(val),
+                  ),
+                ],
                 ),
-                _buildIndustrialInput(
-                  controller: destinationTextController,
-                  label: 'DESTINATION / DROP-OFF',
-                  icon: Iconsax.location,
-                  iconColor: Colors.redAccent,
-                  isFocused: isSearchingDestination,
-                  onTap: () => setState(() { isSearchingPickup = false; isSearchingDestination = true; }),
-                  onChanged: (val) => searchController.findPlaceAutocomplete(val),
-                ),
-              ],
               ),
             ),
-          ),
 
-          // Search Results
-          Expanded(
-            child: ResponsiveCenter(
-              maxWidth: 760,
-              child: Obx(() {
-              if (searchController.isLoading.value) {
-                return const Center(child: CircularProgressIndicator(color: AvailColors.primary));
-              }
+            // Search Results
+            Expanded(
+              child: ResponsiveCenter(
+                maxWidth: 760,
+                child: Obx(() {
+                if (searchController.isLoading.value) {
+                  return const Center(child: CircularProgressIndicator(color: AvailColors.primary));
+                }
 
-              return ListView(
-                children: [
-                  if (isSearchingPickup && homeController.currentPosition.value != null) ...[
-                    ListTile(
-                      leading: const CircleAvatar(
-                        backgroundColor: Colors.white,
-                        child: Icon(Iconsax.gps, size: 20, color: Colors.blueAccent),
+                return ListView(
+                  children: [
+                    if (isSearchingPickup && homeController.currentPosition.value != null) ...[
+                      ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: circleBg,
+                          child: const Icon(Iconsax.gps, size: 20, color: Colors.blueAccent),
+                        ),
+                        title: const Text('Use Current GPS Location', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        subtitle: const Text('Origin will be set to where you are right now', style: TextStyle(fontSize: 10)),
+                        onTap: () {
+                          homeController.setPickup(homeController.currentPosition.value!, 'Current Location');
+                          if (homeController.destinationLocation.value == null) {
+                            setState(() { isSearchingPickup = false; isSearchingDestination = true; });
+                            destinationTextController.text = '';
+                            searchController.findPlaceAutocomplete('');
+                          } else {
+                            Get.back();
+                          }
+                        },
                       ),
-                      title: const Text('Use Current GPS Location', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                      subtitle: const Text('Origin will be set to where you are right now', style: TextStyle(fontSize: 10)),
+                      const Divider(height: 1, indent: 70),
+                    ],
+                    ListTile(
+                      leading: CircleAvatar(backgroundColor: circleBg, child: const Icon(Iconsax.location5, size: 20, color: AvailColors.primary)),
+                      title: const Text('Set location on map', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      subtitle: const Text('Pick a spot manually', style: TextStyle(fontSize: 10)),
                       onTap: () {
-                        homeController.setPickup(homeController.currentPosition.value!, 'Current Location');
-                        if (homeController.destinationLocation.value == null) {
-                          setState(() { isSearchingPickup = false; isSearchingDestination = true; });
-                          destinationTextController.text = '';
-                          searchController.findPlaceAutocomplete('');
-                        } else {
-                          Get.back();
-                        }
+                        Get.back(); // Close RouteSelectionScreen
+                        homeController.enterMapSelectionMode(isSearchingPickup ? 'pickup' : 'destination', fromDispatch: false);
                       },
                     ),
                     const Divider(height: 1, indent: 70),
+                    if (searchController.placePredictions.isEmpty) 
+                      _buildEmptySearch()
+                    else
+                      ...searchController.placePredictions.map((prediction) => Column(
+                        children: [
+                          ListTile(
+                            leading: CircleAvatar(backgroundColor: circleBg, child: Icon(Iconsax.radar, size: 20, color: dark ? Colors.white70 : AvailColors.secondary)),
+                            title: Text(prediction['description'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            subtitle: Text(prediction['structured_formatting']?['secondary_text'] ?? 'Logistics Node', style: const TextStyle(fontSize: 10)),
+                            onTap: () => _handleSelection(prediction),
+                          ),
+                          const Divider(height: 1, indent: 70),
+                        ],
+                      )).toList(),
                   ],
-                  ListTile(
-                    leading: const CircleAvatar(backgroundColor: Colors.white, child: Icon(Iconsax.location5, size: 20, color: AvailColors.primary)),
-                    title: const Text('Set location on map', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                    subtitle: const Text('Pick a spot manually', style: TextStyle(fontSize: 10)),
-                    onTap: () {
-                      Get.back(); // Close RouteSelectionScreen
-                      homeController.enterMapSelectionMode(isSearchingPickup ? 'pickup' : 'destination', fromDispatch: false);
-                    },
-                  ),
-                  const Divider(height: 1, indent: 70),
-                  if (searchController.placePredictions.isEmpty) 
-                    _buildEmptySearch()
-                  else
-                    ...searchController.placePredictions.map((prediction) => Column(
-                      children: [
-                        ListTile(
-                          leading: const CircleAvatar(backgroundColor: Colors.white, child: Icon(Iconsax.radar, size: 20, color: AvailColors.secondary)),
-                          title: Text(prediction['description'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                          subtitle: Text(prediction['structured_formatting']?['secondary_text'] ?? 'Logistics Node', style: const TextStyle(fontSize: 10)),
-                          onTap: () => _handleSelection(prediction),
-                        ),
-                        const Divider(height: 1, indent: 70),
-                      ],
-                    )).toList(),
-                ],
-              );
-            }),
+                );
+              }),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

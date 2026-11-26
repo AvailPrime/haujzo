@@ -48,9 +48,11 @@ class ChangeName extends StatelessWidget {
           ],
         ),
       ),
-      body: MaxWidthContainer(
-        maxWidth: 540,
-        child: SingleChildScrollView(
+      body: SafeArea(
+        top: false,
+        child: MaxWidthContainer(
+          maxWidth: 540,
+          child: SingleChildScrollView(
           padding: const EdgeInsets.all(AvailSizes.defaultSpace),
           child: Container(
             padding: const EdgeInsets.all(22),
@@ -161,6 +163,7 @@ class ChangeName extends StatelessWidget {
             ),
           ),
         ),
+      ),
       ),
     );
   }

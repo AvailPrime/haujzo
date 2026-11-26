@@ -113,14 +113,17 @@ class _PaystackWebViewScreenState extends State<PaystackWebViewScreen> {
                 : const SizedBox.shrink(),
           ),
         ),
-        body: Stack(
-          children: [
-            WebViewWidget(controller: controller),
-            if (isLoading)
-              const Center(
-                child: CircularProgressIndicator(),
-              ),
-          ],
+        body: SafeArea(
+          top: false,
+          child: Stack(
+            children: [
+              WebViewWidget(controller: controller),
+              if (isLoading)
+                const Center(
+                  child: CircularProgressIndicator(),
+                ),
+            ],
+          ),
         ),
       ),
     );

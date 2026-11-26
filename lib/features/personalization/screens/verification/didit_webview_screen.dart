@@ -199,15 +199,19 @@ class _DiditWebViewScreenState extends State<DiditWebViewScreen> {
       appBar: AvailAppbar(
         title: Text(widget.title),
         showBackArrow: true,
+        showBackgroundColor: true,
       ),
-      body: Stack(
-        children: [
-          WebViewWidget(controller: webViewController),
-          if (isLoading)
-            const Center(
-              child: CircularProgressIndicator(color: AvailColors.primary),
-            ),
-        ],
+      body: SafeArea(
+        top: false,
+        child: Stack(
+          children: [
+            WebViewWidget(controller: webViewController),
+            if (isLoading)
+              const Center(
+                child: CircularProgressIndicator(color: AvailColors.primary),
+              ),
+          ],
+        ),
       ),
     );
   }

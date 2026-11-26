@@ -19,35 +19,58 @@ class DriverNavigationMenu extends StatelessWidget {
     return SiteLayout(
       mobile: Scaffold(
         bottomNavigationBar: Obx(
-          () => NavigationBar(
-            height: 64,
-            elevation: 0,
-            selectedIndex: controller.selectedIndex.value,
-            onDestinationSelected: (index) => controller.selectedIndex.value = index,
-            backgroundColor: darkMode ? AvailColors.black : AvailColors.white,
-            indicatorColor: AvailColors.primary.withValues(alpha: 0.15),
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Iconsax.radar),
-                label: 'Dashboard',
-                selectedIcon: Icon(Iconsax.radar, color: AvailColors.primary),
-              ),
-              NavigationDestination(
-                icon: Icon(Iconsax.task),
-                label: 'Tasks',
-                selectedIcon: Icon(Iconsax.task, color: AvailColors.primary),
-              ),
-              NavigationDestination(
-                icon: Icon(Iconsax.wallet),
-                label: 'Earnings',
-                selectedIcon: Icon(Iconsax.wallet, color: AvailColors.primary),
-              ),
-              NavigationDestination(
-                icon: Icon(Iconsax.user),
-                label: 'Account',
-                selectedIcon: Icon(Iconsax.user, color: AvailColors.primary),
-              ),
-            ],
+          () => NavigationBarTheme(
+            data: NavigationBarThemeData(
+              iconTheme: WidgetStateProperty.resolveWith((states) {
+                final isSelected = states.contains(WidgetState.selected);
+                return IconThemeData(
+                  color: isSelected
+                      ? AvailColors.primary
+                      : (darkMode ? Colors.grey.shade300 : const Color(0xFF64748B)),
+                  size: 24,
+                );
+              }),
+              labelTextStyle: WidgetStateProperty.resolveWith((states) {
+                final isSelected = states.contains(WidgetState.selected);
+                return TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                  color: isSelected
+                      ? AvailColors.primary
+                      : (darkMode ? Colors.grey.shade400 : const Color(0xFF64748B)),
+                );
+              }),
+            ),
+            child: NavigationBar(
+              height: 64,
+              elevation: 0,
+              selectedIndex: controller.selectedIndex.value,
+              onDestinationSelected: (index) => controller.selectedIndex.value = index,
+              backgroundColor: darkMode ? AvailColors.black : AvailColors.white,
+              indicatorColor: AvailColors.primary.withValues(alpha: 0.15),
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Iconsax.radar),
+                  label: 'Dashboard',
+                  selectedIcon: Icon(Iconsax.radar, color: AvailColors.primary),
+                ),
+                NavigationDestination(
+                  icon: Icon(Iconsax.task),
+                  label: 'Tasks',
+                  selectedIcon: Icon(Iconsax.task, color: AvailColors.primary),
+                ),
+                NavigationDestination(
+                  icon: Icon(Iconsax.wallet),
+                  label: 'Earnings',
+                  selectedIcon: Icon(Iconsax.wallet, color: AvailColors.primary),
+                ),
+                NavigationDestination(
+                  icon: Icon(Iconsax.user),
+                  label: 'Account',
+                  selectedIcon: Icon(Iconsax.user, color: AvailColors.primary),
+                ),
+              ],
+            ),
           ),
         ),
         body: Obx(() => controller.screens[controller.selectedIndex.value]),

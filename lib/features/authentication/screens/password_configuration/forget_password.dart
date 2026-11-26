@@ -16,43 +16,46 @@ class ForgotPasswordScreen extends StatelessWidget {
     final controller = Get.put(ForgotPasswordController());
     return Scaffold(
       appBar: AppBar(),
-      body: MaxWidthContainer(
-        maxWidth: 500,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(AvailSizes.defaultspace),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              /// Heading
-              Text(AvailTexts.forgotPasswordTitle, style: Theme.of(context).textTheme.headlineMedium),
-              const SizedBox(height: AvailSizes.spacebtwitems),
-              Text(AvailTexts.forgotPasswordSubtitle, style: Theme.of(context).textTheme.labelMedium),
-              const SizedBox(height: AvailSizes.spacebtwsections * 1.5),
+      body: SafeArea(
+        top: false,
+        child: MaxWidthContainer(
+          maxWidth: 500,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AvailSizes.defaultspace),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                /// Heading
+                Text(AvailTexts.forgotPasswordTitle, style: Theme.of(context).textTheme.headlineMedium),
+                const SizedBox(height: AvailSizes.spacebtwitems),
+                Text(AvailTexts.forgotPasswordSubtitle, style: Theme.of(context).textTheme.labelMedium),
+                const SizedBox(height: AvailSizes.spacebtwsections * 1.5),
 
-              /// Text field
-              Form(
-                key: controller.forgotPasswordFormKey,
-                child: TextFormField(
-                  controller: controller.email,
-                  validator: AvailValidator.validateEmail,
-                  decoration: const InputDecoration(
-                    labelText: AvailTexts.email,
-                    prefixIcon: Icon(Iconsax.direct_right),
+                /// Text field
+                Form(
+                  key: controller.forgotPasswordFormKey,
+                  child: TextFormField(
+                    controller: controller.email,
+                    validator: AvailValidator.validateEmail,
+                    decoration: const InputDecoration(
+                      labelText: AvailTexts.email,
+                      prefixIcon: Icon(Iconsax.direct_right),
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: AvailSizes.spacebtwsections),
+                const SizedBox(height: AvailSizes.spacebtwsections),
 
-              /// Submit Button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => controller.sendPasswordResetEmail(),
-                  child: const Text(AvailTexts.submit),
+                /// Submit Button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => controller.sendPasswordResetEmail(),
+                    child: const Text(AvailTexts.submit),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

@@ -46,10 +46,12 @@ class PlaceSearchScreen extends StatelessWidget {
           onPressed: () => Get.back(),
         ),
       ),
-      body: ResponsiveCenter(
-        maxWidth: 760,
-        child: Column(
-          children: [
+      body: SafeArea(
+        top: false,
+        child: ResponsiveCenter(
+          maxWidth: 760,
+          child: Column(
+            children: [
           // Elegant Search Input
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
@@ -208,6 +210,7 @@ class PlaceSearchScreen extends StatelessWidget {
             }),
           ),
         ],
+          ),
         ),
       ),
     );

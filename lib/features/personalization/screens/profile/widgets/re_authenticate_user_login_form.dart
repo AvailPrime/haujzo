@@ -17,9 +17,11 @@ class ReAuthLoginForm extends StatelessWidget {
     final controller = UserController.instance;
     return Scaffold(
       appBar: const AvailAppbar(title: Text('Re-Authenticate'), showBackArrow: true),
-      body: MaxWidthContainer(
-        maxWidth: 520,
-        child: SingleChildScrollView(
+      body: SafeArea(
+        top: false,
+        child: MaxWidthContainer(
+          maxWidth: 520,
+          child: SingleChildScrollView(
           padding: const EdgeInsets.all(AvailSizes.defaultSpace),
           child: Form(
           key: controller.reAuthFormKey,
@@ -67,6 +69,7 @@ class ReAuthLoginForm extends StatelessWidget {
           ),
         ),
         ),
+      ),
       ),
     );
   }

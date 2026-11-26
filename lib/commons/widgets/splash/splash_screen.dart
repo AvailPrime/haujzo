@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
 import '../../../utils/constants/colors.dart';
 import '../../../utils/constants/sizes.dart';
-import '../../../utils/helpers/helper_functions.dart';
 import '../images/app_logo.dart';
 
 /// Reusable helper for managing native splash screen lifecycle
@@ -42,8 +41,7 @@ class AvailSplashScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dark = AvailHelperFunctions.isDarkMode(context);
-    final bgColor = backgroundColor ?? (dark ? AvailColors.dark : Colors.white);
+    final bgColor = backgroundColor ?? Colors.white;
     final primaryColor = indicatorColor ?? AvailColors.primary;
 
     return Scaffold(
@@ -81,7 +79,7 @@ class AvailSplashScreen extends StatelessWidget {
                   footerText!,
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: dark ? Colors.white60 : Colors.black54,
+                        color: Colors.black54,
                       ),
                 ),
               ),
