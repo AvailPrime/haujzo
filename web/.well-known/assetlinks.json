@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.haujzo.app",
+      "sha256_cert_fingerprints": [
+        "F8:AE:98:9A:9A:C9:B5:F1:9E:F0:2B:95:89:71:52:A8:5F:55:A1:17:54:5A:17:C0:57:9C:98:D7:F6:FF:2E:E8"
+      ]
+    }
+  }
+]

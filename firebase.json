@@ -1,0 +1,77 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
+    }
+  ],
+  "hosting": {
+    "target": "haujzo",
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/node_modules/**"
+    ],
+    "headers": [
+      {
+        "source": "/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/.well-known/assetlinks.json",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "trucks-9ba6d",
+          "appId": "1:674897217546:android:2e3095bec125fc5c7777f3",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "trucks-9ba6d",
+          "configurations": {
+            "android": "1:674897217546:android:2e3095bec125fc5c7777f3",
+            "ios": "1:674897217546:ios:67bb98408a99fc4a7777f3",
+            "macos": "1:674897217546:ios:67bb98408a99fc4a7777f3",
+            "web": "1:674897217546:web:943b8f7d1ba0b8e57777f3",
+            "windows": "1:674897217546:web:b7faef7b8577d8247777f3"
+          }
+        }
+      }
+    }
+  }
+}

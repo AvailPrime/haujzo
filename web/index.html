@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Book trucks, manage shipments, and track freight deliveries seamlessly with Haujzo.">
+  <meta name="theme-color" content="#122F51">
+  <link rel="canonical" href="https://haujzo.com/">
+
+  <!-- Disable caching for the entry point to ensure users always get the latest version immediately -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+
+  <!-- Open Graph / Social Sharing (WhatsApp, Facebook, LinkedIn, Slack) -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Haujzo">
+  <meta property="og:title" content="Haujzo — Truck Booking &amp; Freight Logistics">
+  <meta property="og:description" content="Book trucks, manage shipments, and track freight deliveries seamlessly with Haujzo.">
+  <meta property="og:url" content="https://haujzo.com/">
+  <meta property="og:image" content="https://haujzo.com/og-image.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Haujzo Logo">
+
+  <!-- Twitter / X Cards -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Haujzo — Truck Booking &amp; Freight Logistics">
+  <meta name="twitter:description" content="Book trucks, manage shipments, and track freight deliveries seamlessly with Haujzo.">
+  <meta name="twitter:image" content="https://haujzo.com/og-image.png">
+  <meta name="twitter:image:alt" content="Haujzo Logo">
+
+  <!-- iOS & Mobile Web App Meta Tags -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Haujzo">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+
+  <!-- Favicons (Google Search requires square icons >= 48x48) -->
+  <link rel="icon" type="image/png" sizes="96x96" href="favicon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="icons/Icon-512.png">
+  <link rel="shortcut icon" href="favicon.png">
+
+  <title>Haujzo — Truck Booking &amp; Freight Logistics</title>
+  <link rel="manifest" href="manifest.json">
+
+  <!-- Google Sign-In Web Client ID -->
+  <meta name="google-signin-client_id" content="674897217546-29ovlhe4snqhllt8t8qccgh6e6clfpbn.apps.googleusercontent.com">
+
+  <!-- Google Maps JavaScript API -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBjDfWTXODgH0CPZudAGR6qR3qSevLVcR4"></script>
+
+  <!-- Structured Data for Search Engines -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "Haujzo",
+    "url": "https://haujzo.com/",
+    "logo": "https://haujzo.com/icons/Icon-512.png"
+  }
+  </script>
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      background-color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    #haujzo-web-splash {
+      position: fixed;
+      inset: 0;
+      z-index: 99999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(180deg, #ffffff 0%, #f4f7fb 100%);
+      transition: opacity 0.32s ease-out, visibility 0.32s ease-out;
+    }
+
+    #haujzo-web-splash.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .haujzo-splash-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 24px;
+    }
+
+    .haujzo-splash-logo {
+      width: 148px;
+      height: 148px;
+      object-fit: contain;
+      border-radius: 28px;
+      background: #ffffff;
+      padding: 12px;
+      box-shadow: 0 14px 36px rgba(18, 47, 81, 0.12);
+      border: 1px solid rgba(18, 47, 81, 0.08);
+      margin-bottom: 20px;
+    }
+
+    .haujzo-splash-subtitle {
+      color: #122F51;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      margin-bottom: 18px;
+    }
+
+    .haujzo-progress-track {
+      width: 180px;
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(18, 47, 81, 0.12);
+      overflow: hidden;
+    }
+
+    .haujzo-progress-bar {
+      width: 45%;
+      height: 100%;
+      border-radius: 999px;
+      background: #FF6200;
+      animation: haujzoLoad 1.2s ease-in-out infinite;
+    }
+
+    @keyframes haujzoLoad {
+      0% { transform: translateX(-100%); }
+      50% { transform: translateX(120%); }
+      100% { transform: translateX(250%); }
+    }
+  </style>
+</head>
+<body>
+  <!-- Branded Pre-Bootstrap Loading Screen -->
+  <div id="haujzo-web-splash" aria-label="Loading Haujzo">
+    <div class="haujzo-splash-card">
+      <img class="haujzo-splash-logo" src="icons/Icon-192.png" alt="Haujzo Logo">
+      <div class="haujzo-splash-subtitle">Truck Booking &amp; Freight Logistics</div>
+      <div class="haujzo-progress-track">
+        <div class="haujzo-progress-bar"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Hide the HTML splash once Flutter paints its first frame
+    function hideHaujzoSplash() {
+      var splash = document.getElementById('haujzo-web-splash');
+      if (splash && !splash.classList.contains('hidden')) {
+        splash.classList.add('hidden');
+        setTimeout(function () {
+          if (splash && splash.parentNode) {
+            splash.parentNode.removeChild(splash);
+          }
+        }, 380);
+      }
+    }
+    window.addEventListener('flutter-first-frame', hideHaujzoSplash);
+    // Safety fallback in case the event is missed
+    setTimeout(hideHaujzoSplash, 12000);
+
+    // Ensure any previously registered service workers are unregistered so browsers
+    // do not serve stale cached app bundles after a new deployment.
+    (function () {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function (registrations) {
+          for (var i = 0; i < registrations.length; i++) {
+            registrations[i].unregister();
+          }
+        });
+      }
+      if ('caches' in window) {
+        caches.keys().then(function (keys) {
+          for (var i = 0; i < keys.length; i++) {
+            caches.delete(keys[i]);
+          }
+        });
+      }
+
+      // Enable pre-registered Firebase App Check debug token on localhost / 127.0.0.1
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        self.FIREBASE_APPCHECK_DEBUG_TOKEN = '955ae9a9-10ef-467b-8c0f-970cc5331f88';
+      }
+
+      var bootstrapScript = document.createElement('script');
+      bootstrapScript.src = 'flutter_bootstrap.js?_t=' + Date.now();
+      bootstrapScript.async = true;
+      document.body.appendChild(bootstrapScript);
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "trucks-9ba6d"
+  },
+  "targets": {
+    "trucks-9ba6d": {
+      "hosting": {
+        "haujzo": [
+          "haujzo"
+        ]
+      }
+    }
+  }
+}

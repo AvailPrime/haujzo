@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+	<dict>
+		<key>CFBundleDevelopmentRegion</key>
+		<string>$(DEVELOPMENT_LANGUAGE)</string>
+		<key>CFBundleDisplayName</key>
+		<string>Haujzo</string>
+		<key>CFBundleExecutable</key>
+		<string>$(EXECUTABLE_NAME)</string>
+		<key>CFBundleIdentifier</key>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+		<key>CFBundleInfoDictionaryVersion</key>
+		<string>6.0</string>
+		<key>CFBundleName</key>
+		<string>Haujzo</string>
+		<key>CFBundlePackageType</key>
+		<string>APPL</string>
+		<key>CFBundleShortVersionString</key>
+		<string>$(FLUTTER_BUILD_NAME)</string>
+		<key>CFBundleSignature</key>
+		<string>????</string>
+		<key>CFBundleVersion</key>
+		<string>$(FLUTTER_BUILD_NUMBER)</string>
+		<key>LSRequiresIPhoneOS</key>
+		<true/>
+		<key>UILaunchStoryboardName</key>
+		<string>LaunchScreen</string>
+		<key>UIMainStoryboardFile</key>
+		<string>Main</string>
+		<key>UISupportedInterfaceOrientations</key>
+		<array>
+			<string>UIInterfaceOrientationPortrait</string>
+			<string>UIInterfaceOrientationLandscapeLeft</string>
+			<string>UIInterfaceOrientationLandscapeRight</string>
+		</array>
+		<key>UISupportedInterfaceOrientations~ipad</key>
+		<array>
+			<string>UIInterfaceOrientationPortrait</string>
+			<string>UIInterfaceOrientationPortraitUpsideDown</string>
+			<string>UIInterfaceOrientationLandscapeLeft</string>
+			<string>UIInterfaceOrientationLandscapeRight</string>
+		</array>
+		<key>CADisableMinimumFrameDurationOnPhone</key>
+		<true/>
+		<key>UIApplicationSupportsIndirectInputEvents</key>
+		<true/>
+		<key>NSLocationWhenInUseUsageDescription</key>
+		<string>Haujzo requires access to your location while using the app to pin pickup and drop-off points on the map, calculate freight routes, and track active deliveries.</string>
+		<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+		<string>Haujzo requires location access to provide live dispatch telemetry and real-time freight tracking between drivers and customers during active trips.</string>
+		<key>NSCameraUsageDescription</key>
+		<string>Haujzo requires camera access to allow you to capture profile photos, scan waybills, inspect cargo documents, and complete KYC/KYB identity verification.</string>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>Haujzo requires photo library access so you can upload cargo photos, waybill documents, vehicle images, and profile pictures.</string>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>Haujzo requires microphone access to record voice notes in trip chat and support identity verification.</string>
+		<!-- Google Login & Deep Link Config -->
+		<key>GIDClientID</key>
+		<string>674897217546-fdl9mkamip78g9mh159q0l2nqe6puaj6.apps.googleusercontent.com</string>
+		<key>GIDServerClientID</key>
+		<string>674897217546-29ovlhe4snqhllt8t8qccgh6e6clfpbn.apps.googleusercontent.com</string>
+		<key>CFBundleURLTypes</key>
+		<array>
+			<dict>
+				<key>CFBundleTypeRole</key>
+				<string>Editor</string>
+				<key>CFBundleURLSchemes</key>
+				<array>
+					<string>com.googleusercontent.apps.674897217546-fdl9mkamip78g9mh159q0l2nqe6puaj6</string>
+					<string>com.googleusercontent.apps.674897217546-3k2umjb8o5hb384lblvcrgq932lbiir6</string>
+					<string>haujzo</string>
+				</array>
+			</dict>
+		</array>
+		<key>UIBackgroundModes</key>
+		<array>
+			<string>fetch</string>
+			<string>remote-notification</string>
+		</array>
+		<key>UIStatusBarHidden</key>
+		<false/>
+		<key>UIViewControllerBasedStatusBarAppearance</key>
+		<false/>
+		<key>ITSAppUsesNonExemptEncryption</key>
+		<false/>
+		<key>LSApplicationQueriesSchemes</key>
+		<array>
+			<string>https</string>
+			<string>http</string>
+			<string>tel</string>
+			<string>sms</string>
+			<string>mailto</string>
+			<string>comgooglemaps</string>
+		</array>
+	</dict>
+</plist>

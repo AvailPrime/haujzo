@@ -1,0 +1,1729 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // Assumed Data Model (Haujzo Shared Pool: Shippers + Drivers + Admin)
+    // =========================================================================
+    //
+    // Collection: Users/{userId}
+    // Document ID: Firebase Auth UID (Shippers, Business Shippers, or Driver mirrors)
+    // Shipper/Customer Fields:
+    //   - id: string (optional, == userId if present)
+    //   - firstName / FirstName, lastName / LastName: string (0..80 chars)
+    //   - username / Username: string (0..80 chars)
+    //   - email: string (optional, valid email format or empty, <= 160 chars)
+    //   - phoneNumber: string (optional, <= 30 chars)
+    //   - profilePicture / ProfilePicture: string (optional, empty or valid http/https URL, <= 1000 chars)
+    //   - gender, dateOfBirth, country, countryCode, defaultAddressId: string (optional, bounded)
+    //   - allowDataUsage: bool (optional)
+    //   - fcmToken: string (optional, <= 500 chars)
+    //   - notificationPreferences: map (optional, bounded keys)
+    //   - role: string (required, 'user' | 'client' | 'shipper' | 'owner' | 'business_shipper' | 'agent' for shippers; 'driver' | 'business_driver' for driver mirrors)
+    //   - accountType: string (optional, 'individual' | 'business')
+    //   - companyName, registrationNumber, businessAddress: string (optional, bounded)
+    //   - idDocumentType, idDocumentName, idDocumentNumber, idDocumentExpiry: string (optional, bounded)
+    //   - kycFormSubmitted, kybFormSubmitted: bool (optional)
+    //   - verificationStatus, verificationType, diditRequestId, verifiedAt, rejectionReason: (optional, bounded)
+    //   - diditSessionId, diditBusinessSessionId, diditStatus, diditVerified, isVerified: (cannot self-approve)
+    //   - kycStatus, kycSessionId, kycVerified, kycAdminApprovalStatus, kycAdminRejectionReason, kycAdminApprovalDate
+    //   - kybStatus, kybSessionId, kybVerified, kybAdminApprovalStatus, kybAdminRejectionReason, kybAdminApprovalDate
+    //   - adminApprovalStatus, adminApproved, adminRejectionReason, adminApprovalDate (immutable by user)
+    //   - updatedAt, createdAt: timestamp (optional)
+    //
+    // Subcollection: Users/{userId}/Addresses/{addressId}
+    //   Fields: id, name, phoneNumber, street, city, state, postalCode, country, dateTime
+    //
+    // Subcollection: Users/{userId}/Notifications/{notificationId}
+    //   Fields: title, body, message, timestamp, isRead, type, targetId
+    //
+    // Subcollection: Users/{userId}/PaymentDetails/{paymentId}
+    //   Fields: id, method, mobileNumber, maskedNumber, network, accountName, last4, brand, expMonth, expYear, authorizationCode, createdAt
+    //
+    // Subcollection: Users/{userId}/transactions/{txId}
+    //   Written by Cloud Functions (Admin SDK) for shipper refunds; read-only for owner & admin.
+    //
+    // Collection: drivers/{driverId}
+    //   Strictly owner-only + admin-only read (contains PII, IDs, commission balances).
+    //   Subcollections: trucks, fleet_drivers, notifications, payment_methods, transactions, cancelled_trips
+    //
+    // Collection: drivers_public/{driverId}
+    //   Non-PII public dispatch telemetry for shipper home-map display (no email/phone/IDs/balances).
+    //   Fields: id, driverId, vehicleType, vehicleModel, licensePlate, status, isOnline, currentLocation, heading, bearing, rating, completedTrips, lastSeen, updatedAt
+    //
+    // Collection: bookings/{bookingId}
+    //   Shipper creates in 'pending' state (requires verified + admin-approved shipper, unpaid initial state).
+    //   Shipper can edit own unassigned 'pending' booking, attach documents, or sync verified Paystack payment mirror.
+    //   Eligible verified drivers accept, update live GPS location, progress sequential geofenced stages, or release.
+    //   Subcollections: chats/{chatSessionId}, chats/{chatSessionId}/messages/{messageId}, messages/{messageId}
+    //
+    // Collection: Banners/{bannerId}
+    //   Read-only active promotional banners for authenticated users; admin write.
+    //
+    // Collection: counters/{counterId}
+    //   Atomic sequential ID counters (+1 increment only) for booking/manifest IDs.
+    //
+    // Collections: app_settings/{doc}, Settings/{doc}, payment_gateway/{doc}, DiditWebhookEvents/{id},
+    //   DiditWebhookLogs/{id}, Payments/{ref}, support_tickets/{id}, account_deletion_requests/{id},
+    //   admin_2fa_secrets/{id}, admin_2fa_challenges/{id}, server_internal/{id}
+    // =========================================================================
+
+    // =========================================================================
+    // Helper Functions
+    // =========================================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isActiveAdminUser(u) {
+      return !(u.get('status', 'active') in ['blocked', 'suspended', 'disabled']) &&
+        (
+          u.get('isSuperAdmin', false) == true ||
+          u.get('role', '') in [
+            'admin', 'administrator', 'superadmin', 'super_admin', 'finance',
+            'support', 'customer_service', 'operations',
+            'fleet_manager', 'marketing', 'staff_admin'
+          ]
+        );
+    }
+
+    function isAdmin() {
+      let uPath = /databases/$(database)/documents/Users/$(request.auth.uid);
+      return isAuthenticated() && (
+        request.auth.token.admin == true ||
+        request.auth.token.role == 'admin' ||
+        (exists(uPath) && isActiveAdminUser(get(uPath).data))
+      );
+    }
+
+    function hasRequiredFields(data, fields) {
+      return data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(data, fields) {
+      return data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    function isValidString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isOptionalString(data, field, minLen, maxLen) {
+      return !(field in data) || data[field] == null ||
+        (data[field] is string && data[field].size() >= minLen && data[field].size() <= maxLen);
+    }
+
+    function isOptionalNum(data, field, minVal, maxVal) {
+      return !(field in data) || data[field] == null ||
+        (data[field] is number && data[field] >= minVal && data[field] <= maxVal);
+    }
+
+    function isOptionalBool(data, field) {
+      return !(field in data) || data[field] == null || data[field] is bool;
+    }
+
+    function isOptionalTimestamp(data, field) {
+      return !(field in data) || data[field] == null || data[field] is timestamp;
+    }
+
+    function isOptionalTimestampOrDateString(data, field) {
+      return !(field in data) || data[field] == null ||
+        data[field] is timestamp ||
+        (data[field] is string && data[field].size() <= 60);
+    }
+
+    function isValidUrl(url) {
+      return url is string &&
+        (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    function isValidEmail(email) {
+      return email is string &&
+        email.size() >= 5 &&
+        email.size() <= 160 &&
+        email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // Checks if the authenticated driver has completed Didit verification,
+    // received Admin Operations approval, has no unpaid commission debt, and is not pending deletion.
+    function isEligibleVerifiedDriver() {
+      let uid = request.auth.uid;
+      let dPath = /databases/$(database)/documents/drivers/$(uid);
+      return isAuthenticated() &&
+        exists(dPath) &&
+        (
+          get(dPath).data.get('diditVerified', false) == true ||
+          get(dPath).data.get('verificationStatus', 'unverified') == 'approved'
+        ) &&
+        (
+          get(dPath).data.get('adminApprovalStatus', 'pending') == 'approved' ||
+          get(dPath).data.get('adminApproved', false) == true
+        ) &&
+        get(dPath).data.get('isCommissionBlocked', false) != true &&
+        get(dPath).data.get('commissionOwed', 0) <= 0 &&
+        get(dPath).data.get('deletionRequested', false) != true;
+    }
+
+    // Checks if the authenticated shipper has completed Didit KYC/KYB verification
+    // and received Admin Operations approval for their active profile track.
+    function isEligibleVerifiedShipper() {
+      let uid = request.auth.uid;
+      let uPath = /databases/$(database)/documents/Users/$(uid);
+      let u = get(uPath).data;
+      let isBiz = u.get('accountType', 'individual') in ['business', 'Business', 'BUSINESS'] || u.get('role', 'user') in ['agent', 'business_shipper'];
+      let trackVerified = isBiz
+        ? (
+            u.get('kybVerified', false) == true ||
+            u.get('kybStatus', 'Not Started') in ['Approved', 'approved', 'APPROVED'] ||
+            u.get('diditVerified', false) == true ||
+            u.get('isVerified', false) == true ||
+            u.get('diditStatus', 'Not Started') in ['Approved', 'approved', 'APPROVED'] ||
+            u.get('verificationStatus', 'unverified') in ['approved', 'Approved', 'APPROVED'] ||
+            u.get('verification_status', 'unverified') in ['approved', 'Approved', 'APPROVED']
+          )
+        : (
+            u.get('kycVerified', false) == true ||
+            u.get('kycStatus', 'Not Started') in ['Approved', 'approved', 'APPROVED'] ||
+            u.get('diditVerified', false) == true ||
+            u.get('isVerified', false) == true ||
+            u.get('diditStatus', 'Not Started') in ['Approved', 'approved', 'APPROVED'] ||
+            u.get('verificationStatus', 'unverified') in ['approved', 'Approved', 'APPROVED'] ||
+            u.get('verification_status', 'unverified') in ['approved', 'Approved', 'APPROVED']
+          );
+      let trackApproved = isBiz
+        ? (
+            u.get('kybAdminApprovalStatus', 'pending') in ['approved', 'Approved', 'APPROVED'] ||
+            u.get('kybAdminApproved', false) == true ||
+            u.get('adminApprovalStatus', 'pending') in ['approved', 'Approved', 'APPROVED'] ||
+            u.get('adminApproved', false) == true
+          )
+        : (
+            u.get('kycAdminApprovalStatus', 'pending') in ['approved', 'Approved', 'APPROVED'] ||
+            u.get('kycAdminApproved', false) == true ||
+            u.get('adminApprovalStatus', 'pending') in ['approved', 'Approved', 'APPROVED'] ||
+            u.get('adminApproved', false) == true
+          );
+
+      return isAuthenticated() &&
+        exists(uPath) &&
+        trackVerified &&
+        trackApproved &&
+        u.get('deletionRequested', false) != true &&
+        !(u.get('status', 'active') in ['blocked', 'suspended', 'disabled']);
+    }
+
+    function isBusinessFleetOwner(companyId) {
+      let dPath = /databases/$(database)/documents/drivers/$(companyId);
+      return isOwner(companyId) &&
+        exists(dPath) &&
+        get(dPath).data.get('accountType', 'individual') == 'business';
+    }
+
+    // =========================================================================
+    // Domain Validators - Drivers
+    // =========================================================================
+
+    function allowedDriverKeys() {
+      return [
+        'id', 'firstName', 'lastName', 'email', 'phoneNumber', 'profilePicture',
+        'vehicleType', 'vehicleModel', 'licensePlate', 'licenseNumber',
+        'status', 'currentLocation', 'heading', 'bearing',
+        'rating', 'completedTrips', 'role', 'accountType',
+        'companyName', 'registrationNumber', 'businessRegistrationNumber', 'taxNumber', 'businessAddress',
+        'emergencyContact',
+        'idDocumentType', 'idDocumentName', 'idDocumentNumber', 'idDocumentExpiry',
+        'licenseName', 'licenseClass', 'licenseExpiry', 'kycFormSubmitted',
+        'verificationStatus', 'verificationType', 'diditRequestId', 'verifiedAt', 'rejectionReason',
+        'diditSessionId', 'diditBusinessSessionId', 'diditVendorData', 'diditSessionKind',
+        'diditWebhookType', 'diditStatus', 'diditVerified', 'diditUpdatedAt', 'diditDecision', 'isVerified',
+        'kybStatus', 'kybSessionId', 'kybVerified', 'kybAdminApprovalStatus', 'kybAdminRejectionReason',
+        'kycStatus', 'kycSessionId', 'kycVerified', 'kycAdminApprovalStatus', 'kycAdminRejectionReason',
+        'adminApprovalStatus', 'adminApproved', 'adminRejectionReason', 'adminApprovalDate',
+        'commissionOwed', 'totalGrossEarnings', 'totalCommissionPaid', 'completedTripsCount',
+        'isCommissionBlocked', 'lastTripCompletedAt', 'lastSettledAt',
+        'notificationPreferences', 'deletionRequested', 'deletionRequestedAt',
+        'isOnline', 'lastSeen', 'lastUpdated', 'updatedAt', 'createdAt',
+        'fcmToken', 'deviceToken'
+      ];
+    }
+
+    function isValidNotificationPreferences(prefs) {
+      return prefs is map &&
+        hasOnlyAllowedFields(prefs, [
+          'loudDispatchAlerts', 'chatSoundAlerts',
+          'tripNotificationsEnabled', 'highValueBroadcastsEnabled',
+          'orderUpdates', 'promotions', 'securityAlerts', 'updatedAt'
+        ]) &&
+        isOptionalBool(prefs, 'loudDispatchAlerts') &&
+        isOptionalBool(prefs, 'chatSoundAlerts') &&
+        isOptionalBool(prefs, 'tripNotificationsEnabled') &&
+        isOptionalBool(prefs, 'highValueBroadcastsEnabled') &&
+        isOptionalBool(prefs, 'orderUpdates') &&
+        isOptionalBool(prefs, 'promotions') &&
+        isOptionalBool(prefs, 'securityAlerts') &&
+        isOptionalTimestamp(prefs, 'updatedAt');
+    }
+
+    function isValidDriverDocument(data, docId) {
+      return hasOnlyAllowedFields(data, allowedDriverKeys()) &&
+        hasRequiredFields(data, ['id', 'firstName', 'lastName', 'email', 'phoneNumber', 'role', 'accountType', 'status']) &&
+        data.id == docId &&
+        isValidString(data.firstName, 1, 80) &&
+        isValidString(data.lastName, 1, 80) &&
+        isValidEmail(data.email) &&
+        isValidString(data.phoneNumber, 0, 30) &&
+        data.role in ['driver', 'business_driver'] &&
+        data.accountType in ['individual', 'business'] &&
+        data.status in ['online', 'offline', 'busy'] &&
+        (
+          !('profilePicture' in data) || data.profilePicture == null ||
+          data.profilePicture == '' ||
+          (isValidUrl(data.profilePicture) && data.profilePicture.size() <= 1000)
+        ) &&
+        isOptionalString(data, 'vehicleType', 0, 50) &&
+        isOptionalString(data, 'vehicleModel', 0, 100) &&
+        isOptionalString(data, 'licensePlate', 0, 30) &&
+        isOptionalString(data, 'licenseNumber', 0, 50) &&
+        (!('currentLocation' in data) || data.currentLocation == null || data.currentLocation is latlng) &&
+        isOptionalNum(data, 'heading', -360, 360) &&
+        isOptionalNum(data, 'bearing', -360, 360) &&
+        isOptionalNum(data, 'rating', 0, 5) &&
+        (!('completedTrips' in data) || (data.completedTrips is int && data.completedTrips >= 0)) &&
+        (!('completedTripsCount' in data) || (data.completedTripsCount is int && data.completedTripsCount >= 0)) &&
+        isOptionalString(data, 'companyName', 0, 150) &&
+        isOptionalString(data, 'registrationNumber', 0, 80) &&
+        isOptionalString(data, 'businessRegistrationNumber', 0, 80) &&
+        isOptionalString(data, 'taxNumber', 0, 80) &&
+        isOptionalString(data, 'businessAddress', 0, 300) &&
+        isOptionalString(data, 'emergencyContact', 0, 60) &&
+        isOptionalString(data, 'idDocumentType', 0, 50) &&
+        isOptionalString(data, 'idDocumentName', 0, 120) &&
+        isOptionalString(data, 'idDocumentNumber', 0, 60) &&
+        isOptionalString(data, 'idDocumentExpiry', 0, 30) &&
+        isOptionalString(data, 'licenseName', 0, 120) &&
+        isOptionalString(data, 'licenseClass', 0, 100) &&
+        isOptionalString(data, 'licenseExpiry', 0, 30) &&
+        isOptionalBool(data, 'kycFormSubmitted') &&
+        (
+          !('verificationStatus' in data) ||
+          data.verificationStatus in ['unverified', 'pending', 'approved', 'declined', 'resubmitted', 'abandoned', 'expired']
+        ) &&
+        (!('verificationType' in data) || data.verificationType in ['none', 'kyc', 'kyb']) &&
+        isOptionalString(data, 'diditRequestId', 0, 150) &&
+        isOptionalString(data, 'diditSessionId', 0, 150) &&
+        isOptionalString(data, 'diditBusinessSessionId', 0, 150) &&
+        isOptionalString(data, 'diditVendorData', 0, 150) &&
+        isOptionalString(data, 'diditSessionKind', 0, 50) &&
+        isOptionalString(data, 'diditWebhookType', 0, 100) &&
+        isOptionalString(data, 'diditStatus', 0, 50) &&
+        isOptionalBool(data, 'diditVerified') &&
+        isOptionalBool(data, 'isVerified') &&
+        (!('verifiedAt' in data) || data.verifiedAt == null || isValidString(data.verifiedAt, 0, 60) || data.verifiedAt is timestamp) &&
+        isOptionalString(data, 'rejectionReason', 0, 500) &&
+        (!('adminApprovalStatus' in data) || data.adminApprovalStatus in ['pending', 'approved', 'rejected']) &&
+        isOptionalBool(data, 'adminApproved') &&
+        isOptionalString(data, 'adminRejectionReason', 0, 500) &&
+        isOptionalString(data, 'adminApprovalDate', 0, 60) &&
+        isOptionalNum(data, 'commissionOwed', 0, 10000000) &&
+        isOptionalNum(data, 'totalGrossEarnings', 0, 100000000) &&
+        isOptionalNum(data, 'totalCommissionPaid', 0, 100000000) &&
+        isOptionalBool(data, 'isCommissionBlocked') &&
+        (!('notificationPreferences' in data) || isValidNotificationPreferences(data.notificationPreferences)) &&
+        isOptionalBool(data, 'deletionRequested') &&
+        isOptionalBool(data, 'isOnline') &&
+        isOptionalString(data, 'fcmToken', 0, 500) &&
+        isOptionalString(data, 'deviceToken', 0, 500) &&
+        isOptionalTimestamp(data, 'lastTripCompletedAt') &&
+        isOptionalTimestamp(data, 'lastSettledAt') &&
+        isOptionalTimestamp(data, 'deletionRequestedAt') &&
+        isOptionalTimestamp(data, 'diditUpdatedAt') &&
+        isOptionalTimestamp(data, 'lastSeen') &&
+        isOptionalTimestamp(data, 'lastUpdated') &&
+        isOptionalTimestamp(data, 'updatedAt') &&
+        isOptionalTimestamp(data, 'createdAt');
+    }
+
+    function isValidDriverCreateState(data) {
+      return data.status == 'offline' &&
+        data.get('diditVerified', false) == false &&
+        data.get('isVerified', false) == false &&
+        data.get('verificationStatus', 'unverified') == 'unverified' &&
+        data.get('adminApprovalStatus', 'pending') == 'pending' &&
+        data.get('adminApproved', false) == false &&
+        data.get('commissionOwed', 0) == 0 &&
+        data.get('totalGrossEarnings', 0) == 0 &&
+        data.get('totalCommissionPaid', 0) == 0 &&
+        data.get('completedTrips', 0) == 0 &&
+        data.get('completedTripsCount', 0) == 0 &&
+        data.get('isCommissionBlocked', false) == false &&
+        data.get('deletionRequested', false) == false &&
+        data.get('rating', 5.0) == 5.0 &&
+        !('kycVerified' in data) &&
+        !('kybVerified' in data) &&
+        !('kycAdminApprovalStatus' in data) &&
+        !('kybAdminApprovalStatus' in data) &&
+        !('diditDecision' in data);
+    }
+
+    function isValidDriverUpdateState() {
+      let prev = resource.data;
+      let next = request.resource.data;
+      let adminImmutable = [
+        'id', 'adminApprovalStatus', 'adminApproved', 'adminApprovalDate', 'adminRejectionReason',
+        'rating', 'totalCommissionPaid', 'diditDecision',
+        'kybVerified', 'kycVerified', 'kybAdminApprovalStatus', 'kybAdminRejectionReason',
+        'kycAdminApprovalStatus', 'kycAdminRejectionReason', 'createdAt'
+      ];
+      let noRoleEscalation =
+        next.role == prev.role ||
+        (prev.get('adminApprovalStatus', 'pending') != 'approved' && next.role in ['driver', 'business_driver']);
+      let noSelfDiditApproval =
+        (next.get('diditVerified', false) == false || prev.get('diditVerified', false) == true) &&
+        (next.get('isVerified', false) == false || prev.get('isVerified', false) == true) &&
+        (next.get('verificationStatus', 'unverified') != 'approved' || prev.get('verificationStatus', 'unverified') == 'approved') &&
+        (next.get('diditStatus', 'Not Started') != 'Approved' || prev.get('diditStatus', 'Not Started') == 'Approved');
+      let noCommissionTampering =
+        next.get('commissionOwed', 0) >= prev.get('commissionOwed', 0) &&
+        (!prev.get('isCommissionBlocked', false) || next.get('isCommissionBlocked', false) == true) &&
+        (next.get('commissionOwed', 0) <= 0 || next.get('isCommissionBlocked', false) == true);
+      let canGoOnline =
+        next.status != 'online' || (
+          (prev.get('diditVerified', false) == true || prev.get('verificationStatus', 'unverified') == 'approved') &&
+          (prev.get('adminApprovalStatus', 'pending') == 'approved' || prev.get('adminApproved', false) == true) &&
+          prev.get('isCommissionBlocked', false) != true &&
+          prev.get('commissionOwed', 0) <= 0 &&
+          prev.get('deletionRequested', false) != true &&
+          next.get('deletionRequested', false) != true
+        );
+      let deletionImmutableOnceSet =
+        prev.get('deletionRequested', false) != true || next.get('deletionRequested', false) == true;
+
+      return areImmutableFieldsUnchanged(adminImmutable) &&
+        noRoleEscalation &&
+        noSelfDiditApproval &&
+        noCommissionTampering &&
+        canGoOnline &&
+        deletionImmutableOnceSet;
+    }
+
+    function isValidDriverPublicDoc(data, driverId) {
+      return hasOnlyAllowedFields(data, [
+          'id', 'driverId', 'vehicleType', 'vehicleModel', 'licensePlate',
+          'status', 'isOnline', 'currentLocation', 'heading', 'bearing',
+          'rating', 'completedTrips', 'lastSeen', 'updatedAt'
+        ]) &&
+        hasRequiredFields(data, ['status']) &&
+        data.get('id', driverId) == driverId &&
+        data.get('driverId', driverId) == driverId &&
+        data.status in ['online', 'offline', 'busy'] &&
+        isOptionalBool(data, 'isOnline') &&
+        isOptionalString(data, 'vehicleType', 0, 50) &&
+        isOptionalString(data, 'vehicleModel', 0, 100) &&
+        isOptionalString(data, 'licensePlate', 0, 30) &&
+        (!('currentLocation' in data) || data.currentLocation == null || data.currentLocation is latlng) &&
+        isOptionalNum(data, 'heading', -360, 360) &&
+        isOptionalNum(data, 'bearing', -360, 360) &&
+        isOptionalNum(data, 'rating', 0, 5) &&
+        (!('completedTrips' in data) || (data.completedTrips is int && data.completedTrips >= 0)) &&
+        isOptionalTimestamp(data, 'lastSeen') &&
+        isOptionalTimestamp(data, 'updatedAt');
+    }
+
+    // =========================================================================
+    // Domain Validators - Shippers / Non-Driver Users (Users/{userId})
+    // =========================================================================
+
+    function allowedNonDriverUserKeys() {
+      return [
+        'id', 'firstName', 'FirstName', 'lastName', 'LastName',
+        'username', 'Username', 'email', 'Email', 'phoneNumber', 'PhoneNumber',
+        'profilePicture', 'ProfilePicture', 'gender', 'dateOfBirth',
+        'country', 'countryCode', 'allowDataUsage', 'fcmToken', 'deviceToken',
+        'notificationPreferences', 'defaultAddressId',
+        'role', 'accountType', 'vehicleType', 'licensePlate', 'status', 'currentLocation',
+        'companyName', 'registrationNumber', 'businessRegistrationNumber', 'taxNumber', 'businessAddress',
+        'idDocumentType', 'idDocumentName', 'idDocumentNumber', 'idDocumentExpiry', 'kycFormSubmitted',
+        'kycVerified', 'kycStatus', 'kycSessionId',
+        'kycAdminApprovalStatus', 'kycAdminApproved', 'kycAdminRejectionReason', 'kycAdminApprovalDate',
+        'kybVerified', 'kybStatus', 'kybSessionId', 'kybFormSubmitted',
+        'kybAdminApprovalStatus', 'kybAdminApproved', 'kybAdminRejectionReason', 'kybAdminApprovalDate',
+        'verificationStatus', 'verification_status', 'verificationType', 'diditRequestId',
+        'verifiedAt', 'rejectionReason',
+        'diditSessionId', 'diditBusinessSessionId', 'diditVendorData', 'diditSessionKind',
+        'diditWebhookType', 'diditStatus', 'diditVerified', 'diditUpdatedAt', 'diditDecision', 'isVerified',
+        'adminApprovalStatus', 'adminApproved', 'adminRejectionReason', 'adminApprovalDate',
+        'isOnline', 'lastSeen',
+        'deletionRequested', 'deletionRequestedAt', 'lastUpdated', 'updatedAt', 'createdAt'
+      ];
+    }
+
+    function isValidNonDriverUserDoc(data, docId) {
+      return hasOnlyAllowedFields(data, allowedNonDriverUserKeys()) &&
+        data.get('id', docId) == docId &&
+        data.get('role', 'shipper') in ['shipper', 'business_shipper', 'user', 'client', 'owner', 'agent'] &&
+        data.get('accountType', 'individual') in ['individual', 'business'] &&
+        data.get('status', 'offline') in ['online', 'offline', 'busy', 'active'] &&
+        isOptionalBool(data, 'isOnline') &&
+        isOptionalTimestamp(data, 'lastSeen') &&
+        isOptionalString(data, 'firstName', 0, 80) &&
+        isOptionalString(data, 'FirstName', 0, 80) &&
+        isOptionalString(data, 'lastName', 0, 80) &&
+        isOptionalString(data, 'LastName', 0, 80) &&
+        isOptionalString(data, 'username', 0, 80) &&
+        isOptionalString(data, 'Username', 0, 80) &&
+        (!('email' in data) || data.email == null || data.email == '' || isValidEmail(data.email)) &&
+        (!('Email' in data) || data.Email == null || data.Email == '' || isValidEmail(data.Email)) &&
+        isOptionalString(data, 'phoneNumber', 0, 30) &&
+        isOptionalString(data, 'PhoneNumber', 0, 30) &&
+        (
+          !('profilePicture' in data) || data.profilePicture == null ||
+          data.profilePicture == '' ||
+          (isValidUrl(data.profilePicture) && data.profilePicture.size() <= 1000)
+        ) &&
+        (
+          !('ProfilePicture' in data) || data.ProfilePicture == null ||
+          data.ProfilePicture == '' ||
+          (isValidUrl(data.ProfilePicture) && data.ProfilePicture.size() <= 1000)
+        ) &&
+        isOptionalString(data, 'gender', 0, 30) &&
+        isOptionalString(data, 'dateOfBirth', 0, 30) &&
+        isOptionalString(data, 'country', 0, 80) &&
+        isOptionalString(data, 'countryCode', 0, 15) &&
+        isOptionalBool(data, 'allowDataUsage') &&
+        isOptionalString(data, 'fcmToken', 0, 500) &&
+        isOptionalString(data, 'deviceToken', 0, 500) &&
+        isOptionalString(data, 'defaultAddressId', 0, 128) &&
+        (!('notificationPreferences' in data) || isValidNotificationPreferences(data.notificationPreferences)) &&
+        isOptionalString(data, 'vehicleType', 0, 50) &&
+        isOptionalString(data, 'licensePlate', 0, 30) &&
+        (!('currentLocation' in data) || data.currentLocation == null || data.currentLocation is latlng) &&
+        isOptionalString(data, 'companyName', 0, 150) &&
+        isOptionalString(data, 'registrationNumber', 0, 80) &&
+        isOptionalString(data, 'businessRegistrationNumber', 0, 80) &&
+        isOptionalString(data, 'taxNumber', 0, 80) &&
+        isOptionalString(data, 'businessAddress', 0, 300) &&
+        isOptionalString(data, 'idDocumentType', 0, 50) &&
+        isOptionalString(data, 'idDocumentName', 0, 120) &&
+        isOptionalString(data, 'idDocumentNumber', 0, 60) &&
+        isOptionalString(data, 'idDocumentExpiry', 0, 30) &&
+        isOptionalBool(data, 'kycFormSubmitted') &&
+        isOptionalBool(data, 'kybFormSubmitted') &&
+        isOptionalBool(data, 'kycVerified') &&
+        isOptionalString(data, 'kycStatus', 0, 50) &&
+        isOptionalString(data, 'kycSessionId', 0, 150) &&
+        (!('kycAdminApprovalStatus' in data) || data.kycAdminApprovalStatus in ['pending', 'approved', 'rejected']) &&
+        isOptionalBool(data, 'kycAdminApproved') &&
+        isOptionalString(data, 'kycAdminRejectionReason', 0, 500) &&
+        isOptionalString(data, 'kycAdminApprovalDate', 0, 60) &&
+        isOptionalBool(data, 'kybVerified') &&
+        isOptionalString(data, 'kybStatus', 0, 50) &&
+        isOptionalString(data, 'kybSessionId', 0, 150) &&
+        (!('kybAdminApprovalStatus' in data) || data.kybAdminApprovalStatus in ['pending', 'approved', 'rejected']) &&
+        isOptionalBool(data, 'kybAdminApproved') &&
+        isOptionalString(data, 'kybAdminRejectionReason', 0, 500) &&
+        isOptionalString(data, 'kybAdminApprovalDate', 0, 60) &&
+        (
+          !('verificationStatus' in data) ||
+          data.verificationStatus in ['unverified', 'pending', 'approved', 'declined', 'resubmitted', 'abandoned', 'expired']
+        ) &&
+        isOptionalString(data, 'verification_status', 0, 50) &&
+        (!('verificationType' in data) || data.verificationType in ['none', 'kyc', 'kyb']) &&
+        isOptionalString(data, 'diditRequestId', 0, 150) &&
+        isOptionalString(data, 'diditSessionId', 0, 150) &&
+        isOptionalString(data, 'diditBusinessSessionId', 0, 150) &&
+        isOptionalString(data, 'diditVendorData', 0, 150) &&
+        isOptionalString(data, 'diditSessionKind', 0, 50) &&
+        isOptionalString(data, 'diditWebhookType', 0, 100) &&
+        isOptionalString(data, 'diditStatus', 0, 50) &&
+        isOptionalBool(data, 'diditVerified') &&
+        isOptionalBool(data, 'isVerified') &&
+        isOptionalTimestampOrDateString(data, 'verifiedAt') &&
+        isOptionalString(data, 'rejectionReason', 0, 500) &&
+        (!('adminApprovalStatus' in data) || data.adminApprovalStatus in ['pending', 'approved', 'rejected']) &&
+        isOptionalBool(data, 'adminApproved') &&
+        isOptionalString(data, 'adminRejectionReason', 0, 500) &&
+        isOptionalString(data, 'adminApprovalDate', 0, 60) &&
+        isOptionalBool(data, 'deletionRequested') &&
+        isOptionalTimestamp(data, 'deletionRequestedAt') &&
+        isOptionalTimestamp(data, 'diditUpdatedAt') &&
+        isOptionalTimestamp(data, 'lastUpdated') &&
+        isOptionalTimestamp(data, 'updatedAt') &&
+        isOptionalTimestamp(data, 'createdAt');
+    }
+
+    function isValidNonDriverUserCreateState(data) {
+      return data.get('diditVerified', false) == false &&
+        data.get('isVerified', false) == false &&
+        data.get('kycVerified', false) == false &&
+        data.get('kybVerified', false) == false &&
+        data.get('verificationStatus', 'unverified') in ['unverified', 'pending'] &&
+        data.get('adminApprovalStatus', 'pending') == 'pending' &&
+        data.get('adminApproved', false) == false &&
+        data.get('kycAdminApprovalStatus', 'pending') == 'pending' &&
+        data.get('kycAdminApproved', false) == false &&
+        data.get('kybAdminApprovalStatus', 'pending') == 'pending' &&
+        data.get('kybAdminApproved', false) == false &&
+        data.get('deletionRequested', false) == false &&
+        !('diditDecision' in data);
+    }
+
+    function isValidNonDriverUserUpdateState() {
+      let prev = resource.data;
+      let next = request.resource.data;
+      let adminImmutable = [
+        'id', 'diditDecision', 'adminApprovalDate',
+        'kycAdminApprovalDate', 'kybAdminApprovalDate',
+        'kycAdminRejectionReason', 'kybAdminRejectionReason', 'createdAt'
+      ];
+      // Prevent self-escalation of KYC/KYB verification; allow track-switching to mirror an already-earned track
+      let noSelfDiditApproval =
+        (next.get('kycVerified', false) == false || prev.get('kycVerified', false) == true) &&
+        (next.get('kybVerified', false) == false || prev.get('kybVerified', false) == true) &&
+        (next.get('isVerified', false) == false || prev.get('isVerified', false) == true) &&
+        (
+          next.get('diditVerified', false) == false ||
+          prev.get('diditVerified', false) == true ||
+          (next.get('accountType', 'individual') == 'business' && prev.get('kybVerified', false) == true) ||
+          (next.get('accountType', 'individual') == 'individual' && prev.get('kycVerified', false) == true)
+        ) &&
+        (
+          next.get('verificationStatus', 'unverified') != 'approved' ||
+          prev.get('verificationStatus', 'unverified') == 'approved' ||
+          (next.get('accountType', 'individual') == 'business' && prev.get('kybVerified', false) == true) ||
+          (next.get('accountType', 'individual') == 'individual' && prev.get('kycVerified', false) == true)
+        ) &&
+        (
+          next.get('diditStatus', 'Not Started') != 'Approved' ||
+          prev.get('diditStatus', 'Not Started') == 'Approved' ||
+          (next.get('accountType', 'individual') == 'business' && prev.get('kybStatus', 'Not Started') == 'Approved') ||
+          (next.get('accountType', 'individual') == 'individual' && prev.get('kycStatus', 'Not Started') == 'Approved')
+        );
+      // Prevent self-escalation of Admin approval; allow track-switching to mirror an already-approved track
+      let noSelfAdminApproval =
+        (next.get('kycAdminApprovalStatus', 'pending') != 'approved' || prev.get('kycAdminApprovalStatus', 'pending') == 'approved') &&
+        (next.get('kybAdminApprovalStatus', 'pending') != 'approved' || prev.get('kybAdminApprovalStatus', 'pending') == 'approved') &&
+        (next.get('kycAdminApproved', false) == false || prev.get('kycAdminApproved', false) == true) &&
+        (next.get('kybAdminApproved', false) == false || prev.get('kybAdminApproved', false) == true) &&
+        (
+          next.get('adminApprovalStatus', 'pending') != 'approved' ||
+          prev.get('adminApprovalStatus', 'pending') == 'approved' ||
+          (next.get('accountType', 'individual') == 'business' && prev.get('kybAdminApprovalStatus', 'pending') == 'approved') ||
+          (next.get('accountType', 'individual') == 'individual' && prev.get('kycAdminApprovalStatus', 'pending') == 'approved')
+        ) &&
+        (
+          next.get('adminApproved', false) == false ||
+          prev.get('adminApproved', false) == true ||
+          (next.get('accountType', 'individual') == 'business' && prev.get('kybAdminApprovalStatus', 'pending') == 'approved') ||
+          (next.get('accountType', 'individual') == 'individual' && prev.get('kycAdminApprovalStatus', 'pending') == 'approved')
+        );
+      let deletionImmutableOnceSet =
+        prev.get('deletionRequested', false) != true || next.get('deletionRequested', false) == true;
+
+      return areImmutableFieldsUnchanged(adminImmutable) &&
+        noSelfDiditApproval &&
+        noSelfAdminApproval &&
+        deletionImmutableOnceSet;
+    }
+
+    function isValidUserAddress(data) {
+      return hasOnlyAllowedFields(data, [
+          'id', 'name', 'phoneNumber', 'street', 'city',
+          'state', 'postalCode', 'country', 'dateTime'
+        ]) &&
+        hasRequiredFields(data, ['name', 'street', 'city']) &&
+        isOptionalString(data, 'id', 0, 128) &&
+        isValidString(data.name, 1, 120) &&
+        isOptionalString(data, 'phoneNumber', 0, 30) &&
+        isValidString(data.street, 1, 200) &&
+        isValidString(data.city, 1, 100) &&
+        isOptionalString(data, 'state', 0, 100) &&
+        isOptionalString(data, 'postalCode', 0, 30) &&
+        isOptionalString(data, 'country', 0, 100) &&
+        isOptionalTimestamp(data, 'dateTime');
+    }
+
+    function isValidUserNotification(data) {
+      return hasOnlyAllowedFields(data, [
+          'id', 'title', 'body', 'message', 'type', 'timestamp', 'isRead', 'targetId', 'createdAt'
+        ]) &&
+        hasRequiredFields(data, ['title', 'type', 'isRead']) &&
+        isOptionalString(data, 'id', 0, 128) &&
+        isValidString(data.title, 1, 160) &&
+        isOptionalString(data, 'body', 0, 1000) &&
+        isOptionalString(data, 'message', 0, 1000) &&
+        data.type in ['general', 'order', 'booking', 'job', 'payment', 'earnings', 'promotion', 'security', 'chat', 'system', 'geofence'] &&
+        data.isRead is bool &&
+        isOptionalString(data, 'targetId', 0, 128) &&
+        isOptionalTimestampOrDateString(data, 'timestamp') &&
+        isOptionalTimestamp(data, 'createdAt');
+    }
+
+    // =========================================================================
+    // Domain Validators - Fleet, Notifications, Payments, Transactions, Support
+    // =========================================================================
+
+    function isValidFleetTruck(data, companyId) {
+      return hasOnlyAllowedFields(data, [
+          'id', 'companyId', 'truckName', 'licensePlate', 'truckType', 'truckModel',
+          'capacity', 'status', 'assignedDriverId', 'assignedDriverName',
+          'assignedDriverPhone', 'currentBookingId', 'createdAt', 'updatedAt'
+        ]) &&
+        hasRequiredFields(data, ['id', 'companyId', 'truckName', 'licensePlate', 'truckType', 'capacity', 'status']) &&
+        isValidString(data.id, 1, 128) &&
+        data.companyId == companyId &&
+        isValidString(data.truckName, 1, 100) &&
+        isValidString(data.licensePlate, 1, 30) &&
+        isValidString(data.truckType, 1, 50) &&
+        isOptionalString(data, 'truckModel', 0, 100) &&
+        isValidString(data.capacity, 1, 50) &&
+        data.status in ['available', 'on_trip', 'maintenance'] &&
+        isOptionalString(data, 'assignedDriverId', 0, 128) &&
+        isOptionalString(data, 'assignedDriverName', 0, 100) &&
+        isOptionalString(data, 'assignedDriverPhone', 0, 30) &&
+        isOptionalString(data, 'currentBookingId', 0, 128) &&
+        isOptionalTimestamp(data, 'createdAt') &&
+        isOptionalTimestamp(data, 'updatedAt');
+    }
+
+    function isValidFleetDriver(data, companyId) {
+      return hasOnlyAllowedFields(data, [
+          'id', 'companyId', 'fullName', 'phoneNumber', 'licenseNumber', 'licenseClass',
+          'status', 'pin', 'assignedTruckId', 'assignedTruckPlate', 'currentBookingId',
+          'rating', 'completedTrips', 'createdAt', 'updatedAt'
+        ]) &&
+        hasRequiredFields(data, ['id', 'companyId', 'fullName', 'phoneNumber', 'status', 'pin']) &&
+        isValidString(data.id, 1, 128) &&
+        data.companyId == companyId &&
+        isValidString(data.fullName, 1, 100) &&
+        isValidString(data.phoneNumber, 5, 30) &&
+        isOptionalString(data, 'licenseNumber', 0, 50) &&
+        isOptionalString(data, 'licenseClass', 0, 100) &&
+        data.status in ['available', 'on_trip', 'off_duty'] &&
+        isValidString(data.pin, 4, 8) &&
+        isOptionalString(data, 'assignedTruckId', 0, 128) &&
+        isOptionalString(data, 'assignedTruckPlate', 0, 30) &&
+        isOptionalString(data, 'currentBookingId', 0, 128) &&
+        isOptionalNum(data, 'rating', 0, 5) &&
+        (!('completedTrips' in data) || (data.completedTrips is int && data.completedTrips >= 0)) &&
+        isOptionalTimestamp(data, 'createdAt') &&
+        isOptionalTimestamp(data, 'updatedAt');
+    }
+
+    function isValidNotification(data) {
+      return hasOnlyAllowedFields(data, [
+          'id', 'title', 'body', 'message', 'type', 'timestamp', 'isRead', 'targetId', 'createdAt'
+        ]) &&
+        hasRequiredFields(data, ['title', 'message', 'type', 'isRead']) &&
+        isOptionalString(data, 'id', 0, 128) &&
+        isValidString(data.title, 1, 160) &&
+        isOptionalString(data, 'body', 0, 1000) &&
+        isValidString(data.message, 1, 1000) &&
+        data.type in ['general', 'order', 'booking', 'job', 'payment', 'earnings', 'promotion', 'security', 'chat', 'system', 'geofence'] &&
+        data.isRead is bool &&
+        isOptionalString(data, 'targetId', 0, 128) &&
+        isOptionalTimestampOrDateString(data, 'timestamp') &&
+        isOptionalTimestamp(data, 'createdAt');
+    }
+
+    function isValidPaymentMethod(data) {
+      return hasOnlyAllowedFields(data, [
+          'id', 'method', 'mobileNumber', 'maskedNumber', 'network', 'accountName',
+          'last4', 'brand', 'expMonth', 'expYear', 'authorizationCode', 'createdAt'
+        ]) &&
+        hasRequiredFields(data, ['method']) &&
+        data.method is map &&
+        hasOnlyAllowedFields(data.method, ['id', 'name', 'image', 'code', 'type']) &&
+        isOptionalString(data.method, 'id', 0, 128) &&
+        isOptionalString(data.method, 'name', 0, 100) &&
+        isOptionalString(data.method, 'image', 0, 300) &&
+        isOptionalString(data.method, 'code', 0, 40) &&
+        isOptionalString(data.method, 'type', 0, 40) &&
+        isOptionalString(data, 'id', 0, 128) &&
+        isOptionalString(data, 'mobileNumber', 0, 30) &&
+        isOptionalString(data, 'maskedNumber', 0, 40) &&
+        isOptionalString(data, 'network', 0, 40) &&
+        isOptionalString(data, 'accountName', 0, 120) &&
+        isOptionalString(data, 'last4', 0, 8) &&
+        isOptionalString(data, 'brand', 0, 40) &&
+        isOptionalNum(data, 'expMonth', 1, 12) &&
+        isOptionalNum(data, 'expYear', 2020, 2100) &&
+        isOptionalString(data, 'authorizationCode', 0, 150) &&
+        isOptionalTimestampOrDateString(data, 'createdAt');
+    }
+
+    function isValidTripEarningsTx(data, txId) {
+      return hasOnlyAllowedFields(data, [
+          'id', 'bookingId', 'type', 'paymentMethod',
+          'grossFare', 'commissionFee', 'netPayout', 'status', 'timestamp', 'createdAtMs'
+        ]) &&
+        hasRequiredFields(data, ['id', 'bookingId', 'type', 'grossFare', 'commissionFee', 'netPayout', 'status']) &&
+        data.id == txId &&
+        isValidString(data.bookingId, 1, 128) &&
+        data.type == 'trip_earnings' &&
+        data.status == 'completed' &&
+        isOptionalString(data, 'paymentMethod', 0, 60) &&
+        data.grossFare is number && data.grossFare >= 0 && data.grossFare <= 10000000 &&
+        data.commissionFee is number && data.commissionFee >= 0 && data.commissionFee <= data.grossFare + 0.05 &&
+        data.netPayout is number && data.netPayout >= 0 && data.netPayout <= data.grossFare + 0.05 &&
+        (!('createdAtMs' in data) || data.createdAtMs is int) &&
+        isOptionalTimestamp(data, 'timestamp');
+    }
+
+    function isValidCancelledTrip(data, cancelId) {
+      return hasOnlyAllowedFields(data, [
+          'id', 'bookingId', 'pickupAddress', 'dropoffAddress', 'price',
+          'truckType', 'weight', 'distance', 'containerSize',
+          'status', 'cancelledAt', 'createdAtMs'
+        ]) &&
+        hasRequiredFields(data, ['id', 'bookingId', 'status']) &&
+        data.id == cancelId &&
+        isValidString(data.bookingId, 1, 128) &&
+        data.status == 'cancelled' &&
+        isOptionalString(data, 'pickupAddress', 0, 300) &&
+        isOptionalString(data, 'dropoffAddress', 0, 300) &&
+        isOptionalNum(data, 'price', 0, 10000000) &&
+        isOptionalString(data, 'truckType', 0, 80) &&
+        isOptionalNum(data, 'weight', 0, 1000000) &&
+        isOptionalNum(data, 'distance', 0, 100000) &&
+        isOptionalString(data, 'containerSize', 0, 40) &&
+        (!('createdAtMs' in data) || data.createdAtMs is int) &&
+        isOptionalTimestamp(data, 'cancelledAt');
+    }
+
+    function isValidSupportTicket(data) {
+      let isDriverTicket = data.get('driverId', '') == request.auth.uid && !('userId' in data);
+      let isShipperTicket = data.get('userId', '') == request.auth.uid && !('driverId' in data);
+      return hasOnlyAllowedFields(data, [
+          'ticketCode', 'driverId', 'driverEmail', 'userId', 'userEmail',
+          'category', 'bookingRef', 'subject', 'message', 'status', 'platform', 'createdAt'
+        ]) &&
+        hasRequiredFields(data, ['ticketCode', 'category', 'subject', 'message', 'status', 'createdAt']) &&
+        (isDriverTicket || isShipperTicket) &&
+        data.status == 'open' &&
+        isValidString(data.ticketCode, 3, 40) &&
+        isOptionalString(data, 'driverEmail', 0, 160) &&
+        isOptionalString(data, 'userEmail', 0, 160) &&
+        isValidString(data.category, 2, 100) &&
+        isOptionalString(data, 'bookingRef', 0, 100) &&
+        isValidString(data.subject, 2, 200) &&
+        isValidString(data.message, 5, 3000) &&
+        isOptionalString(data, 'platform', 0, 40) &&
+        data.createdAt == request.time;
+    }
+
+    function isValidAccountDeletionRequest(data) {
+      let dPath = /databases/$(database)/documents/drivers/$(request.auth.uid);
+      let noPendingCommission = !exists(dPath) || get(dPath).data.get('commissionOwed', 0) <= 0;
+      let isDriverReq = data.get('driverId', '') == request.auth.uid && !('userId' in data);
+      let isShipperReq = data.get('userId', '') == request.auth.uid && !('driverId' in data);
+      return hasOnlyAllowedFields(data, [
+          'driverId', 'userId', 'email', 'reason', 'notes', 'status', 'requestedAt', 'platform'
+        ]) &&
+        hasRequiredFields(data, ['reason', 'status', 'requestedAt']) &&
+        (isDriverReq || isShipperReq) &&
+        data.status == 'pending_review' &&
+        noPendingCommission &&
+        isOptionalString(data, 'email', 0, 160) &&
+        isValidString(data.reason, 2, 200) &&
+        isOptionalString(data, 'notes', 0, 1000) &&
+        isOptionalString(data, 'platform', 0, 40) &&
+        data.requestedAt == request.time;
+    }
+
+    // =========================================================================
+    // Booking Helpers & Validators
+    // =========================================================================
+
+    function isBookingUnassigned(b) {
+      return b.status in ['pending', 'available', 'open', 'unassigned'] &&
+        (!('driverId' in b) || b.driverId == null || b.driverId == '') &&
+        (!('assignedDriverId' in b) || b.assignedDriverId == null || b.assignedDriverId == '');
+    }
+
+    function isAssignedDriverOrCompany(b) {
+      return isAuthenticated() && (
+        b.get('driverId', '') == request.auth.uid ||
+        b.get('companyId', '') == request.auth.uid ||
+        b.get('assignedDriverId', '') == request.auth.uid
+      );
+    }
+
+    function allowedShipperBookingKeys() {
+      return [
+        'id', 'userId', 'bookingId', 'cargoType', 'containerSize', 'containerStatus',
+        'loadDescription', 'senderName', 'senderPhone', 'receiverName', 'receiverPhone',
+        'status', 'timestamp', 'documents', 'truckType', 'price',
+        'pickupAddress', 'dropoffAddress', 'weight', 'distance',
+        'pickupLocation', 'dropoffLocation',
+        'isFragile', 'isInsured', 'requiresLoadingAssistance', 'isHazardous',
+        'tripType', 'roundTripLegMode', 'journeyCategory',
+        'containerDeckSurcharge', 'emptyReturnDiscount', 'excessWeightFee',
+        'specialSurcharges', 'roadAllowance', 'overnightAllowance', 'fragileBonus',
+        'loadingLaborFee', 'driverEarnings', 'platformFee', 'currency',
+        'scheduledDate', 'cargoValue', 'paymentMethod', 'initialPaymentMethod',
+        'paymentStatus', 'paidOnline', 'paymentReference', 'paymentChannel',
+        'paymentNetwork', 'paymentPhone', 'paidAmountGhs', 'paidAmountUsd',
+        'paidByUserId', 'paidAt', 'driverPayoutStatus',
+        'driverId', 'driverName', 'driverPhone', 'vehiclePlate', 'vehicleModel', 'driverRating',
+        'chatSessionId', 'inventory', 'stops', 'updatedAt', 'createdAt',
+        // Preserved server/driver audit fields when editing an existing released pending booking
+        'lastDriverCancelledAt', 'driverCancellationCount', 'driver',
+        'refundStatus', 'refundReference', 'refundAmountUsd', 'refundAmountGhs',
+        'refundMethod', 'refundAccount', 'refundAccountName', 'refundFailureReason', 'refundedAt'
+      ];
+    }
+
+    function isValidShipperBookingPayload(data) {
+      return hasOnlyAllowedFields(data, allowedShipperBookingKeys()) &&
+        hasRequiredFields(data, ['userId', 'status']) &&
+        data.userId == request.auth.uid &&
+        isOptionalString(data, 'id', 0, 128) &&
+        isOptionalString(data, 'bookingId', 0, 80) &&
+        isOptionalString(data, 'cargoType', 0, 100) &&
+        isOptionalString(data, 'containerSize', 0, 60) &&
+        isOptionalString(data, 'containerStatus', 0, 40) &&
+        isOptionalString(data, 'loadDescription', 0, 1000) &&
+        isOptionalString(data, 'senderName', 0, 120) &&
+        isOptionalString(data, 'senderPhone', 0, 30) &&
+        isOptionalString(data, 'receiverName', 0, 120) &&
+        isOptionalString(data, 'receiverPhone', 0, 30) &&
+        isOptionalString(data, 'truckType', 0, 80) &&
+        isOptionalString(data, 'pickupAddress', 0, 300) &&
+        isOptionalString(data, 'dropoffAddress', 0, 300) &&
+        isOptionalNum(data, 'price', 0, 10000000) &&
+        isOptionalNum(data, 'distance', 0, 100000) &&
+        isOptionalNum(data, 'weight', 0, 1000000) &&
+        (!('pickupLocation' in data) || data.pickupLocation == null || data.pickupLocation is latlng) &&
+        (!('dropoffLocation' in data) || data.dropoffLocation == null || data.dropoffLocation is latlng) &&
+        isOptionalBool(data, 'isFragile') &&
+        isOptionalBool(data, 'isInsured') &&
+        isOptionalBool(data, 'requiresLoadingAssistance') &&
+        isOptionalBool(data, 'isHazardous') &&
+        (!('tripType' in data) || data.tripType in ['single', 'round_trip']) &&
+        isOptionalString(data, 'roundTripLegMode', 0, 40) &&
+        isOptionalString(data, 'journeyCategory', 0, 80) &&
+        isOptionalNum(data, 'containerDeckSurcharge', 0, 10000000) &&
+        isOptionalNum(data, 'emptyReturnDiscount', 0, 10000000) &&
+        isOptionalNum(data, 'excessWeightFee', 0, 10000000) &&
+        isOptionalNum(data, 'specialSurcharges', 0, 10000000) &&
+        isOptionalNum(data, 'roadAllowance', 0, 10000000) &&
+        isOptionalNum(data, 'overnightAllowance', 0, 10000000) &&
+        isOptionalNum(data, 'fragileBonus', 0, 10000000) &&
+        isOptionalNum(data, 'loadingLaborFee', 0, 10000000) &&
+        isOptionalNum(data, 'driverEarnings', 0, 10000000) &&
+        isOptionalNum(data, 'platformFee', 0, 10000000) &&
+        isOptionalString(data, 'currency', 0, 15) &&
+        isOptionalNum(data, 'cargoValue', 0, 1000000000) &&
+        isOptionalString(data, 'paymentMethod', 0, 80) &&
+        isOptionalString(data, 'initialPaymentMethod', 0, 80) &&
+        isOptionalString(data, 'chatSessionId', 0, 160) &&
+        isOptionalTimestampOrDateString(data, 'timestamp') &&
+        isOptionalTimestampOrDateString(data, 'scheduledDate') &&
+        isOptionalTimestamp(data, 'updatedAt') &&
+        isOptionalTimestamp(data, 'createdAt') &&
+        (!('documents' in data) || (data.documents is list && data.documents.size() <= 20)) &&
+        (!('inventory' in data) || (data.inventory is list && data.inventory.size() <= 50)) &&
+        (!('stops' in data) || (data.stops is list && data.stops.size() <= 15));
+    }
+
+    function isValidShipperBookingCreate(data) {
+      return isValidShipperBookingPayload(data) &&
+        data.status == 'pending' &&
+        data.get('paidOnline', false) == false &&
+        data.get('paymentStatus', 'unpaid') == 'unpaid' &&
+        (!('paymentReference' in data) || data.paymentReference == null || data.paymentReference == '') &&
+        (!('paidAt' in data) || data.paidAt == null) &&
+        (!('paidAmountGhs' in data) || data.paidAmountGhs == null) &&
+        (!('paidAmountUsd' in data) || data.paidAmountUsd == null) &&
+        (!('paidByUserId' in data) || data.paidByUserId == null || data.paidByUserId == '') &&
+        (!('driverPayoutStatus' in data) || data.driverPayoutStatus == null || data.driverPayoutStatus == '') &&
+        (!('refundStatus' in data) || data.refundStatus == null || data.refundStatus == '') &&
+        (!('refundReference' in data) || data.refundReference == null || data.refundReference == '') &&
+        (!('refundedAt' in data) || data.refundedAt == null) &&
+        (!('chatSessionId' in data) || data.chatSessionId == null || data.chatSessionId == '') &&
+        (!('driverId' in data) || data.driverId == null || data.driverId == '') &&
+        (!('assignedDriverId' in data) || data.assignedDriverId == null || data.assignedDriverId == '') &&
+        (!('companyId' in data) || data.companyId == null || data.companyId == '');
+    }
+
+    function isValidShipperBookingEdit() {
+      let prev = resource.data;
+      let next = request.resource.data;
+      let protectedFields = [
+        'userId', 'status', 'paymentReference',
+        'paymentChannel', 'paymentNetwork', 'paymentPhone', 'paidAmountGhs',
+        'paidAmountUsd', 'paidByUserId', 'paidAt', 'driverPayoutStatus',
+        'refundStatus', 'refundReference', 'refundAmountUsd', 'refundAmountGhs',
+        'refundMethod', 'refundAccount', 'refundAccountName', 'refundFailureReason', 'refundedAt',
+        'lastDriverCancelledAt', 'driverCancellationCount', 'createdAt'
+      ];
+      return prev.get('userId', '') == request.auth.uid &&
+        isEligibleVerifiedShipper() &&
+        isBookingUnassigned(prev) &&
+        prev.status == 'pending' &&
+        next.status == 'pending' &&
+        prev.get('paidOnline', false) == false &&
+        next.get('paidOnline', false) == false &&
+        prev.get('paymentStatus', 'unpaid') == 'unpaid' &&
+        next.get('paymentStatus', 'unpaid') == 'unpaid' &&
+        next.get('driverId', null) == null &&
+        next.get('driverName', null) == null &&
+        next.get('driverPhone', null) == null &&
+        next.get('vehiclePlate', null) == null &&
+        next.get('vehicleModel', null) == null &&
+        (next.get('chatSessionId', null) == null || next.get('chatSessionId', '') == '') &&
+        (next.get('driverRating', null) == null || next.get('driverRating', 0) == 0) &&
+        isValidShipperBookingPayload(next) &&
+        areImmutableFieldsUnchanged(protectedFields);
+    }
+
+    function isValidShipperBookingDocumentsUpdate() {
+      let prev = resource.data;
+      let next = request.resource.data;
+      return prev.get('userId', '') == request.auth.uid &&
+        !(prev.get('status', 'pending') in ['delivered', 'completed', 'cancelled', 'canceled']) &&
+        next.diff(prev).affectedKeys().hasOnly(['documents', 'updatedAt']) &&
+        next.documents is list &&
+        next.documents.size() <= 20 &&
+        isOptionalTimestamp(next, 'updatedAt');
+    }
+
+    function isValidShipperBookingCancel() {
+      let prev = resource.data;
+      let next = request.resource.data;
+      return prev.get('userId', '') == request.auth.uid &&
+        prev.get('status', 'pending') in [
+          'pending', 'available', 'open', 'unassigned',
+          'confirmed', 'accepted', 'assigned',
+          'onTheWayToPickup', 'onthewaytopickup'
+        ] &&
+        next.get('status', '') in ['cancelled', 'canceled'] &&
+        next.diff(prev).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+        isOptionalTimestamp(next, 'updatedAt');
+    }
+
+    function isValidShipperBookingPaymentMirror(bookingId) {
+      let prev = resource.data;
+      let next = request.resource.data;
+      let payRef = next.get('paymentReference', '');
+      let pPath = /databases/$(database)/documents/Payments/$(payRef);
+      let paymentDocValid = payRef is string &&
+        payRef.size() > 0 &&
+        payRef.size() <= 150 &&
+        exists(pPath) &&
+        get(pPath).data.get('status', '') == 'success' &&
+        get(pPath).data.get('userId', '') == request.auth.uid &&
+        get(pPath).data.get('bookingId', '') == bookingId;
+      let alreadySettledSameRef =
+        prev.get('paidOnline', false) == true &&
+        prev.get('paymentStatus', '') == 'paid' &&
+        payRef == prev.get('paymentReference', '');
+
+      return prev.get('userId', '') == request.auth.uid &&
+        next.diff(prev).affectedKeys().hasOnly([
+          'paymentMethod', 'paymentStatus', 'paidOnline', 'paymentReference',
+          'paymentChannel', 'paymentNetwork', 'paymentPhone',
+          'paidAmountGhs', 'paidAmountUsd', 'paidByUserId', 'paidAt', 'updatedAt'
+        ]) &&
+        next.get('paidOnline', false) == true &&
+        next.get('paymentStatus', '') == 'paid' &&
+        next.get('paidByUserId', request.auth.uid) == request.auth.uid &&
+        isOptionalString(next, 'paymentMethod', 1, 80) &&
+        isOptionalString(next, 'paymentChannel', 0, 50) &&
+        isOptionalString(next, 'paymentNetwork', 0, 50) &&
+        isOptionalString(next, 'paymentPhone', 0, 30) &&
+        isOptionalNum(next, 'paidAmountGhs', 0, 100000000) &&
+        isOptionalNum(next, 'paidAmountUsd', 0, 10000000) &&
+        isOptionalTimestampOrDateString(next, 'paidAt') &&
+        isOptionalTimestamp(next, 'updatedAt') &&
+        (alreadySettledSameRef || paymentDocValid);
+    }
+
+    function isValidBookingAcceptance() {
+      let prev = resource.data;
+      let next = request.resource.data;
+      let allowedChanged = [
+        'status', 'driverId', 'driver_id', 'assignedDriverId',
+        'driverName', 'driverPhone', 'vehiclePlate', 'vehicleModel', 'truckType',
+        'companyId', 'companyName', 'assignedTruckId',
+        'driverRating', 'chatSessionId', 'updatedAt'
+      ];
+      return isBookingUnassigned(prev) &&
+        isEligibleVerifiedDriver() &&
+        next.diff(prev).affectedKeys().hasOnly(allowedChanged) &&
+        next.status == 'confirmed' &&
+        next.driverId == request.auth.uid &&
+        next.get('driver_id', request.auth.uid) == request.auth.uid &&
+        isValidString(next.driverName, 1, 120) &&
+        isOptionalString(next, 'driverPhone', 0, 30) &&
+        isOptionalString(next, 'vehiclePlate', 0, 30) &&
+        isOptionalString(next, 'vehicleModel', 0, 100) &&
+        isOptionalString(next, 'truckType', 0, 60) &&
+        (!('companyId' in next) || next.companyId == null || next.companyId == '' || next.companyId == request.auth.uid) &&
+        isOptionalString(next, 'companyName', 0, 150) &&
+        isOptionalString(next, 'assignedTruckId', 0, 128) &&
+        isOptionalString(next, 'assignedDriverId', 0, 128) &&
+        isOptionalNum(next, 'driverRating', 0, 5) &&
+        isValidString(next.chatSessionId, 5, 160) &&
+        isOptionalTimestamp(next, 'updatedAt');
+    }
+
+    function isValidBookingLocationUpdate() {
+      let prev = resource.data;
+      let next = request.resource.data;
+      return isAssignedDriverOrCompany(prev) &&
+        prev.status in [
+          'confirmed', 'onTheWayToPickup', 'onthewaytopickup',
+          'arrivedPickup', 'arrived_pickup', 'pickedUp',
+          'inTransit', 'intransit', 'in_transit'
+        ] &&
+        next.diff(prev).affectedKeys().hasOnly(['driverLocation', 'driverHeading', 'driverBearing', 'lastUpdated']) &&
+        next.driverLocation is latlng &&
+        next.driverHeading is number && next.driverHeading >= -360 && next.driverHeading <= 360 &&
+        next.driverBearing is number && next.driverBearing >= -360 && next.driverBearing <= 360 &&
+        isOptionalTimestamp(next, 'lastUpdated');
+    }
+
+    // Geofence / KM Proximity Helpers (default 500m = 0.5 km radius around pickup/dropoff)
+    function isGeoWithinRadiusKm(driverLoc, targetLat, targetLng, maxKm) {
+      let dLat = driverLoc.latitude() - targetLat;
+      let dLon = driverLoc.longitude() - targetLng;
+      let midLatRad = ((driverLoc.latitude() + targetLat) / 2.0) * 0.0174532925;
+      let x2 = midLatRad * midLatRad;
+      let cosLat = 1.0 - (x2 / 2.0) + ((x2 * x2) / 24.0);
+      let kmLat = dLat * 111.132;
+      let kmLon = dLon * 111.320 * cosLat;
+      return (kmLat * kmLat + kmLon * kmLon) <= (maxKm * maxKm);
+    }
+
+    function isDriverNearCoordinates(driverLoc, targetLat, targetLng, maxKm) {
+      return driverLoc is latlng &&
+        targetLat is number &&
+        targetLng is number &&
+        targetLat >= -90 && targetLat <= 90 &&
+        targetLng >= -180 && targetLng <= 180 &&
+        !(targetLat == 0 && targetLng == 0) &&
+        isGeoWithinRadiusKm(driverLoc, targetLat, targetLng, maxKm);
+    }
+
+    function isDriverNearPickup(driverLoc, b, maxKm) {
+      return (
+        ('pickupLocation' in b && b.pickupLocation is latlng &&
+          isDriverNearCoordinates(driverLoc, b.pickupLocation.latitude(), b.pickupLocation.longitude(), maxKm)) ||
+        ('pickupLocation' in b && b.pickupLocation is map &&
+          isDriverNearCoordinates(driverLoc, b.pickupLocation.get('latitude', b.pickupLocation.get('lat', 0)), b.pickupLocation.get('longitude', b.pickupLocation.get('lng', 0)), maxKm)) ||
+        ('pickup_location' in b && b.pickup_location is latlng &&
+          isDriverNearCoordinates(driverLoc, b.pickup_location.latitude(), b.pickup_location.longitude(), maxKm)) ||
+        ('pickup_location' in b && b.pickup_location is map &&
+          isDriverNearCoordinates(driverLoc, b.pickup_location.get('latitude', b.pickup_location.get('lat', 0)), b.pickup_location.get('longitude', b.pickup_location.get('lng', 0)), maxKm)) ||
+        (('pickupLat' in b && 'pickupLng' in b) &&
+          isDriverNearCoordinates(driverLoc, b.pickupLat, b.pickupLng, maxKm)) ||
+        (('pickup_lat' in b && 'pickup_lng' in b) &&
+          isDriverNearCoordinates(driverLoc, b.pickup_lat, b.pickup_lng, maxKm))
+      );
+    }
+
+    function isDriverNearDropoff(driverLoc, b, maxKm) {
+      return (
+        ('dropoffLocation' in b && b.dropoffLocation is latlng &&
+          isDriverNearCoordinates(driverLoc, b.dropoffLocation.latitude(), b.dropoffLocation.longitude(), maxKm)) ||
+        ('dropoffLocation' in b && b.dropoffLocation is map &&
+          isDriverNearCoordinates(driverLoc, b.dropoffLocation.get('latitude', b.dropoffLocation.get('lat', 0)), b.dropoffLocation.get('longitude', b.dropoffLocation.get('lng', 0)), maxKm)) ||
+        ('dropoff_location' in b && b.dropoff_location is latlng &&
+          isDriverNearCoordinates(driverLoc, b.dropoff_location.latitude(), b.dropoff_location.longitude(), maxKm)) ||
+        ('dropoff_location' in b && b.dropoff_location is map &&
+          isDriverNearCoordinates(driverLoc, b.dropoff_location.get('latitude', b.dropoff_location.get('lat', 0)), b.dropoff_location.get('longitude', b.dropoff_location.get('lng', 0)), maxKm)) ||
+        (('dropoffLat' in b && 'dropoffLng' in b) &&
+          isDriverNearCoordinates(driverLoc, b.dropoffLat, b.dropoffLng, maxKm)) ||
+        (('dropoff_lat' in b && 'dropoff_lng' in b) &&
+          isDriverNearCoordinates(driverLoc, b.dropoff_lat, b.dropoff_lng, maxKm))
+      );
+    }
+
+    function getDriverLocForBooking(prev, next) {
+      let dPath = /databases/$(database)/documents/drivers/$(request.auth.uid);
+      return ('driverLocation' in next && next.driverLocation is latlng)
+        ? next.driverLocation
+        : (('driverLocation' in prev && prev.driverLocation is latlng)
+            ? prev.driverLocation
+            : (exists(dPath) ? get(dPath).data.get('currentLocation', null) : null));
+    }
+
+    function isOptionalStageLocationValid(prev, next) {
+      let changed = next.diff(prev).affectedKeys();
+      return (!changed.hasAny(['driverLocation']) || next.driverLocation is latlng) &&
+        (!changed.hasAny(['driverHeading']) || (next.driverHeading is number && next.driverHeading >= -360 && next.driverHeading <= 360)) &&
+        (!changed.hasAny(['driverBearing']) || (next.driverBearing is number && next.driverBearing >= -360 && next.driverBearing <= 360)) &&
+        isOptionalTimestamp(next, 'lastUpdated');
+    }
+
+    function getBookingPrice(b) {
+      let raw = b.get('price', b.get('amount', b.get('totalPrice', b.get('grossFare', b.get('fare', b.get('total', 0))))));
+      return raw is number ? raw : 10000000;
+    }
+
+    function isValidGeofenceConfig(data) {
+      return hasOnlyAllowedFields(data, [
+          'pickupRadiusMeters', 'dropoffRadiusMeters', 'updatedAt', 'updatedBy'
+        ]) &&
+        (!('pickupRadiusMeters' in data) || (data.pickupRadiusMeters is number && data.pickupRadiusMeters >= 50 && data.pickupRadiusMeters <= 5000)) &&
+        (!('dropoffRadiusMeters' in data) || (data.dropoffRadiusMeters is number && data.dropoffRadiusMeters >= 50 && data.dropoffRadiusMeters <= 5000)) &&
+        isOptionalString(data, 'updatedBy', 0, 128) &&
+        isOptionalTimestamp(data, 'updatedAt');
+    }
+
+    function getGeofenceRadiusKm(fieldName) {
+      let cfgPath = /databases/$(database)/documents/app_settings/geofence_config;
+      let rawMeters = exists(cfgPath) ? get(cfgPath).data.get(fieldName, 500.0) : 500.0;
+      let safeMeters = (rawMeters is number && rawMeters >= 50 && rawMeters <= 5000) ? rawMeters : 500.0;
+      return safeMeters / 1000.0;
+    }
+
+    function isValidDeliveryTransition(prev, next, driverLoc) {
+      let prevPrice = getBookingPrice(prev);
+      let commFee = next.get('commissionFee', 0);
+      let netPay = next.get('driverNetPayout', next.get('driverPayout', 0));
+      let isPaidOnline = prev.get('paidOnline', false) == true || prev.get('paymentStatus', 'unpaid') == 'paid';
+
+      return prev.status in ['inTransit', 'intransit', 'in_transit', 'pickedUp'] &&
+        next.status in ['delivered', 'completed'] &&
+        isDriverNearDropoff(driverLoc, prev, getGeofenceRadiusKm('dropoffRadiusMeters')) &&
+        next.diff(prev).affectedKeys().hasOnly([
+          'status', 'completedAt', 'updatedAt',
+          'driverLocation', 'driverHeading', 'driverBearing', 'lastUpdated',
+          'journeyCategory', 'commissionFee', 'platformFee',
+          'platformCommissionPercent', 'driverNetPayout', 'driverPayout', 'driverPayoutStatus'
+        ]) &&
+        isOptionalString(next, 'journeyCategory', 0, 120) &&
+        commFee is number && commFee >= 0 && commFee <= prevPrice + 0.05 &&
+        netPay is number && netPay >= 0 && (commFee + netPay) <= prevPrice + 0.05 &&
+        isOptionalNum(next, 'platformFee', 0, prevPrice + 0.05) &&
+        isOptionalNum(next, 'platformCommissionPercent', 0, 100) &&
+        isOptionalNum(next, 'driverPayout', 0, prevPrice + 0.05) &&
+        (!('driverPayoutStatus' in next) || (isPaidOnline && next.driverPayoutStatus == 'ready_for_payout')) &&
+        isOptionalTimestamp(next, 'completedAt');
+    }
+
+    function isValidSequentialStageTransition() {
+      let prev = resource.data;
+      let next = request.resource.data;
+      let sPrev = prev.status;
+      let sNext = next.status;
+      let driverLoc = getDriverLocForBooking(prev, next);
+
+      let toPickup =
+        sPrev == 'confirmed' &&
+        sNext in ['onTheWayToPickup', 'onthewaytopickup', 'arrivedPickup', 'arrived_pickup'] &&
+        isDriverNearPickup(driverLoc, prev, getGeofenceRadiusKm('pickupRadiusMeters')) &&
+        next.diff(prev).affectedKeys().hasOnly([
+          'status', 'updatedAt', 'driverLocation', 'driverHeading', 'driverBearing', 'lastUpdated'
+        ]);
+
+      let toTransit =
+        sPrev in ['onTheWayToPickup', 'onthewaytopickup', 'arrivedPickup', 'arrived_pickup'] &&
+        sNext in ['inTransit', 'intransit', 'in_transit', 'pickedUp'] &&
+        isDriverNearPickup(driverLoc, prev, getGeofenceRadiusKm('pickupRadiusMeters')) &&
+        next.diff(prev).affectedKeys().hasOnly([
+          'status', 'updatedAt', 'driverLocation', 'driverHeading', 'driverBearing', 'lastUpdated'
+        ]);
+
+      return isAssignedDriverOrCompany(prev) &&
+        isOptionalTimestamp(next, 'updatedAt') &&
+        isOptionalStageLocationValid(prev, next) &&
+        (toPickup || toTransit || isValidDeliveryTransition(prev, next, driverLoc));
+    }
+
+    function isValidDriverCancellation() {
+      let prev = resource.data;
+      let next = request.resource.data;
+      let releaseFields = [
+        'status', 'driverId', 'driver_id', 'assignedDriverId', 'assignedTruckId',
+        'companyId', 'companyName', 'driver', 'driverName', 'driverPhone',
+        'vehiclePlate', 'vehicleModel', 'driverRating', 'chatSessionId', 'updatedAt'
+      ];
+      let isSoloOrCompanyOwner =
+        prev.get('driverId', '') == request.auth.uid ||
+        prev.get('companyId', '') == request.auth.uid;
+
+      return isAuthenticated() &&
+        isSoloOrCompanyOwner &&
+        prev.status in [
+          'confirmed', 'onTheWayToPickup', 'onthewaytopickup',
+          'arrivedPickup', 'arrived_pickup', 'pickedUp',
+          'inTransit', 'intransit', 'in_transit'
+        ] &&
+        next.diff(prev).affectedKeys().hasOnly(releaseFields) &&
+        next.status == 'pending' &&
+        !('driverId' in next) &&
+        !('driver_id' in next) &&
+        !('assignedDriverId' in next) &&
+        !('assignedTruckId' in next) &&
+        !('companyId' in next) &&
+        !('chatSessionId' in next);
+    }
+
+    // Chat Helpers
+    function isBookingParticipant(bookingId) {
+      let bPath = /databases/$(database)/documents/bookings/$(bookingId);
+      return isAuthenticated() &&
+        exists(bPath) &&
+        (
+          get(bPath).data.get('userId', '') == request.auth.uid ||
+          get(bPath).data.get('driverId', '') == request.auth.uid ||
+          get(bPath).data.get('companyId', '') == request.auth.uid ||
+          get(bPath).data.get('assignedDriverId', '') == request.auth.uid
+        );
+    }
+
+    function isBookingChatUnlocked(bookingId) {
+      let bPath = /databases/$(database)/documents/bookings/$(bookingId);
+      return exists(bPath) &&
+        !(get(bPath).data.get('status', 'pending') in ['delivered', 'completed', 'cancelled']);
+    }
+
+    function isValidChatMessageCreate(data) {
+      return hasOnlyAllowedFields(data, [
+          'senderId', 'chatSessionId', 'senderName', 'senderRole',
+          'type', 'text', 'audioUrl', 'audioBase64', 'imageUrl', 'imageBase64',
+          'lat', 'lng', 'duration', 'durationSeconds',
+          'status', 'isSeen', 'isDelivered', 'isEdited', 'editedAt', 'seenAt',
+          'timestamp', 'createdAtMs',
+          'replyToId', 'replyToText', 'replyToSenderName'
+        ]) &&
+        hasRequiredFields(data, ['senderId', 'senderRole', 'type', 'text', 'status', 'isSeen']) &&
+        data.senderId == request.auth.uid &&
+        data.senderRole in ['driver', 'business_driver', 'user', 'shipper', 'business_shipper', 'agent'] &&
+        data.type in ['text', 'audio', 'image', 'location'] &&
+        isValidString(data.text, 1, 2000) &&
+        isOptionalString(data, 'chatSessionId', 0, 160) &&
+        isOptionalString(data, 'senderName', 0, 120) &&
+        isOptionalString(data, 'audioUrl', 0, 1000) &&
+        isOptionalString(data, 'audioBase64', 0, 900000) &&
+        isOptionalString(data, 'imageUrl', 0, 1000) &&
+        isOptionalString(data, 'imageBase64', 0, 900000) &&
+        isOptionalNum(data, 'lat', -90, 90) &&
+        isOptionalNum(data, 'lng', -180, 180) &&
+        isOptionalString(data, 'duration', 0, 20) &&
+        isOptionalNum(data, 'durationSeconds', 0, 600) &&
+        data.status in ['sent', 'delivered'] &&
+        data.isSeen == false &&
+        isOptionalBool(data, 'isDelivered') &&
+        isOptionalBool(data, 'isEdited') &&
+        isOptionalTimestamp(data, 'editedAt') &&
+        isOptionalTimestamp(data, 'seenAt') &&
+        isOptionalString(data, 'replyToId', 0, 128) &&
+        isOptionalString(data, 'replyToText', 0, 500) &&
+        isOptionalString(data, 'replyToSenderName', 0, 120) &&
+        (!('createdAtMs' in data) || data.createdAtMs is int) &&
+        isOptionalTimestamp(data, 'timestamp');
+    }
+
+    function isValidChatMessageUpdate() {
+      let prev = resource.data;
+      let next = request.resource.data;
+      let unseen = prev.get('isSeen', false) != true && !(prev.get('status', '') in ['seen', 'read']);
+
+      let senderEdit =
+        prev.senderId == request.auth.uid &&
+        unseen &&
+        prev.type != 'audio' &&
+        next.diff(prev).affectedKeys().hasOnly(['text', 'isEdited', 'editedAt']) &&
+        isValidString(next.text, 1, 2000) &&
+        next.isEdited == true &&
+        isOptionalTimestamp(next, 'editedAt');
+
+      let senderAttachRemoteAudioUrl =
+        prev.senderId == request.auth.uid &&
+        prev.type == 'audio' &&
+        next.diff(prev).affectedKeys().hasOnly(['audioUrl']) &&
+        isValidUrl(next.audioUrl) &&
+        next.audioUrl.size() <= 1000 &&
+        !(prev.get('audioUrl', '').matches("^https://.*"));
+
+      let recipientMarkSeen =
+        prev.senderId != request.auth.uid &&
+        next.diff(prev).affectedKeys().hasOnly(['isSeen', 'status', 'seenAt']) &&
+        next.isSeen is bool &&
+        next.status in ['seen', 'read'] &&
+        isOptionalTimestamp(next, 'seenAt');
+
+      return senderEdit || senderAttachRemoteAudioUrl || recipientMarkSeen;
+    }
+
+    // =========================================================================
+    // Collection Rules
+    // =========================================================================
+
+    // 1. Drivers Primary Profiles & Subcollections
+    match /drivers/{driverId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(driverId) &&
+        isValidDriverDocument(request.resource.data, driverId) &&
+        isValidDriverCreateState(request.resource.data);
+      allow update: if (
+        isOwner(driverId) &&
+        isValidDriverDocument(request.resource.data, driverId) &&
+        isValidDriverUpdateState()
+      ) || isAdmin();
+      allow delete: if false;
+
+      match /trucks/{truckId} {
+        allow read: if isOwner(driverId) || isAdmin();
+        allow create: if isBusinessFleetOwner(driverId) &&
+          isValidFleetTruck(request.resource.data, driverId);
+        allow update: if isBusinessFleetOwner(driverId) &&
+          isValidFleetTruck(request.resource.data, driverId) &&
+          areImmutableFieldsUnchanged(['id', 'companyId', 'createdAt']);
+        allow delete: if isBusinessFleetOwner(driverId) &&
+          resource.data.get('status', 'available') != 'on_trip';
+      }
+
+      match /fleet_drivers/{fleetDriverId} {
+        allow read: if isOwner(driverId) || isAdmin();
+        allow create: if isBusinessFleetOwner(driverId) &&
+          isValidFleetDriver(request.resource.data, driverId);
+        allow update: if isBusinessFleetOwner(driverId) &&
+          isValidFleetDriver(request.resource.data, driverId) &&
+          areImmutableFieldsUnchanged(['id', 'companyId', 'createdAt']);
+        allow delete: if isBusinessFleetOwner(driverId) &&
+          resource.data.get('status', 'available') != 'on_trip';
+      }
+
+      match /notifications/{notificationId} {
+        allow read: if isOwner(driverId) || isAdmin();
+        allow create: if isAuthenticated() &&
+          isValidNotification(request.resource.data);
+        allow update: if isOwner(driverId) &&
+          isValidNotification(request.resource.data) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+        allow delete: if isOwner(driverId);
+      }
+
+      match /payment_methods/{paymentId} {
+        allow read: if isOwner(driverId);
+        allow create: if isOwner(driverId) &&
+          isValidPaymentMethod(request.resource.data);
+        allow update: if isOwner(driverId) &&
+          isValidPaymentMethod(request.resource.data) &&
+          areImmutableFieldsUnchanged(['createdAt']);
+        allow delete: if isOwner(driverId);
+      }
+
+      match /transactions/{txId} {
+        allow read: if isOwner(driverId) || isAdmin();
+        allow create: if isOwner(driverId) &&
+          isValidTripEarningsTx(request.resource.data, txId);
+        allow update, delete: if false;
+      }
+
+      match /cancelled_trips/{cancelId} {
+        allow read: if isOwner(driverId) || isAdmin();
+        allow create: if isOwner(driverId) &&
+          isValidCancelledTrip(request.resource.data, cancelId);
+        allow update, delete: if false;
+      }
+    }
+
+    // 1b. Public Non-PII Driver Telemetry (Safe for Shipper Home Map)
+    match /drivers_public/{driverId} {
+      allow read: if isAuthenticated();
+      allow create, update: if (
+        isOwner(driverId) &&
+        isValidDriverPublicDoc(request.resource.data, driverId)
+      ) || isAdmin();
+      allow delete: if isOwner(driverId) || isAdmin();
+    }
+
+    // 2. Users Collection (Shippers, Business Shippers, & Driver Mirrors) & Subcollections
+    match /Users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if (isOwner(userId) && (
+        (
+          request.resource.data.get('role', '') in ['driver', 'business_driver'] &&
+          isValidDriverDocument(request.resource.data, userId) &&
+          isValidDriverCreateState(request.resource.data)
+        ) ||
+        (
+          isValidNonDriverUserDoc(request.resource.data, userId) &&
+          isValidNonDriverUserCreateState(request.resource.data)
+        )
+      )) || isAdmin();
+      allow update: if (
+        isOwner(userId) &&
+        (
+          (
+            resource.data.get('role', '') in ['driver', 'business_driver'] &&
+            request.resource.data.get('role', '') in ['driver', 'business_driver'] &&
+            isValidDriverDocument(request.resource.data, userId) &&
+            isValidDriverUpdateState()
+          ) ||
+          (
+            !(resource.data.get('role', '') in ['driver', 'business_driver']) &&
+            isValidNonDriverUserDoc(request.resource.data, userId) &&
+            isValidNonDriverUserUpdateState()
+          )
+        )
+      ) || isAdmin();
+      allow delete: if false;
+
+      // Shipper Saved Addresses
+      match /Addresses/{addressId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) &&
+          isValidUserAddress(request.resource.data);
+        allow update: if isOwner(userId) &&
+          isValidUserAddress(request.resource.data) &&
+          areImmutableFieldsUnchanged(['dateTime']);
+        allow delete: if isOwner(userId);
+      }
+
+      // Shipper Notifications
+      match /Notifications/{notificationId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isAuthenticated() &&
+          isValidUserNotification(request.resource.data);
+        allow update: if isOwner(userId) &&
+          isValidUserNotification(request.resource.data) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+        allow delete: if isOwner(userId);
+      }
+
+      // Shipper Saved Payment Methods & Card Authorizations
+      match /PaymentDetails/{paymentId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) &&
+          isValidPaymentMethod(request.resource.data);
+        allow update: if isOwner(userId) &&
+          isValidPaymentMethod(request.resource.data) &&
+          areImmutableFieldsUnchanged(['createdAt', 'authorizationCode', 'last4', 'brand', 'expMonth', 'expYear', 'method']);
+        allow delete: if isOwner(userId);
+      }
+
+      // Shipper Refund Ledger (Written by Cloud Functions via Admin SDK ONLY)
+      match /transactions/{txId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if false;
+      }
+    }
+
+    // 3. Lowercase users & Sellers (Strictly owner-only to prevent PII leaks)
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if false;
+    }
+
+    match /Sellers/{sellerId} {
+      allow read: if isOwner(sellerId) || isAdmin();
+      allow write: if false;
+    }
+
+    // 4. Bookings Pool & Active Trips
+    match /bookings/{bookingId} {
+      allow read: if isAuthenticated() && (
+        resource.data.get('userId', '') == request.auth.uid ||
+        isAssignedDriverOrCompany(resource.data) ||
+        (isBookingUnassigned(resource.data) && isEligibleVerifiedDriver()) ||
+        isAdmin()
+      );
+
+      // Only verified & admin-approved shippers can create bookings in unpaid pending state
+      allow create: if isAuthenticated() &&
+        isEligibleVerifiedShipper() &&
+        isValidShipperBookingCreate(request.resource.data);
+
+      // Shipper edits/docs/cancel/verified-payment-sync OR Driver operational transitions OR Admin
+      allow update: if isAuthenticated() && (
+        isValidShipperBookingEdit() ||
+        isValidShipperBookingDocumentsUpdate() ||
+        isValidShipperBookingCancel() ||
+        isValidShipperBookingPaymentMirror(bookingId) ||
+        isValidBookingAcceptance() ||
+        isValidBookingLocationUpdate() ||
+        isValidSequentialStageTransition() ||
+        isValidDriverCancellation() ||
+        isAdmin()
+      );
+
+      allow delete: if isAdmin();
+
+      // Trip Chat Sessions & Messages
+      match /chats/{chatSessionId} {
+        allow read: if isBookingParticipant(bookingId);
+        allow create, update: if isBookingParticipant(bookingId) &&
+          isBookingChatUnlocked(bookingId) &&
+          hasOnlyAllowedFields(request.resource.data, [
+            'driverId', 'driverName', 'shipperId', 'shipperName',
+            'chatSessionId', 'bookingId', 'lastMessage', 'lastSenderRole',
+            'lastUpdated', 'createdAtMs',
+            'shipperTyping', 'shipperTypingUpdatedAt',
+            'driverTyping', 'driverTypingUpdatedAt'
+          ]) &&
+          isOptionalString(request.resource.data, 'driverId', 0, 128) &&
+          isOptionalString(request.resource.data, 'driverName', 0, 120) &&
+          isOptionalString(request.resource.data, 'shipperId', 0, 128) &&
+          isOptionalString(request.resource.data, 'shipperName', 0, 120) &&
+          isOptionalString(request.resource.data, 'chatSessionId', 0, 160) &&
+          isOptionalString(request.resource.data, 'bookingId', 0, 128) &&
+          isOptionalString(request.resource.data, 'lastMessage', 0, 2000) &&
+          isOptionalString(request.resource.data, 'lastSenderRole', 0, 40) &&
+          isOptionalBool(request.resource.data, 'shipperTyping') &&
+          isOptionalTimestamp(request.resource.data, 'shipperTypingUpdatedAt') &&
+          isOptionalBool(request.resource.data, 'driverTyping') &&
+          isOptionalTimestamp(request.resource.data, 'driverTypingUpdatedAt') &&
+          (!('createdAtMs' in request.resource.data) || request.resource.data.createdAtMs is int) &&
+          isOptionalTimestamp(request.resource.data, 'lastUpdated');
+        allow delete: if false;
+
+        match /messages/{messageId} {
+          allow read: if isBookingParticipant(bookingId);
+          allow create: if isBookingParticipant(bookingId) &&
+            isBookingChatUnlocked(bookingId) &&
+            isValidChatMessageCreate(request.resource.data);
+          allow update: if isBookingParticipant(bookingId) &&
+            isBookingChatUnlocked(bookingId) &&
+            isValidChatMessageUpdate();
+          allow delete: if isBookingParticipant(bookingId) &&
+            isBookingChatUnlocked(bookingId) &&
+            resource.data.senderId == request.auth.uid &&
+            resource.data.get('isSeen', false) != true &&
+            !(resource.data.get('status', '') in ['seen', 'read']);
+        }
+      }
+
+      // Compatibility root messages subcollection
+      match /messages/{messageId} {
+        allow read: if isBookingParticipant(bookingId);
+        allow create: if isBookingParticipant(bookingId) &&
+          isBookingChatUnlocked(bookingId) &&
+          isValidChatMessageCreate(request.resource.data);
+        allow update: if isBookingParticipant(bookingId) &&
+          isBookingChatUnlocked(bookingId) &&
+          isValidChatMessageUpdate();
+        allow delete: if isBookingParticipant(bookingId) &&
+          isBookingChatUnlocked(bookingId) &&
+          resource.data.senderId == request.auth.uid &&
+          resource.data.get('isSeen', false) != true &&
+          !(resource.data.get('status', '') in ['seen', 'read']);
+      }
+    }
+
+    // 5. Banners & Sequential ID Counters
+    match /Banners/{bannerId} {
+      allow read: if isAuthenticated() && (resource.data.get('active', false) == true || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    match /counters/{counterId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+        hasOnlyAllowedFields(request.resource.data, ['lastNumber', 'updatedAt']) &&
+        request.resource.data.lastNumber == 1 &&
+        isOptionalTimestamp(request.resource.data, 'updatedAt');
+      allow update: if isAuthenticated() &&
+        hasOnlyAllowedFields(request.resource.data, ['lastNumber', 'updatedAt']) &&
+        request.resource.data.lastNumber is int &&
+        resource.data.lastNumber is int &&
+        request.resource.data.lastNumber == resource.data.lastNumber + 1 &&
+        isOptionalTimestamp(request.resource.data, 'updatedAt');
+      allow delete: if false;
+    }
+
+    // 6. Public/App Configuration (Strict Separation: Secrets Blocked!)
+    match /app_settings/pricing_config {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /app_settings/support_config {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /app_settings/geofence_config {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() && isValidGeofenceConfig(request.resource.data);
+    }
+
+    // Block client access to payment_gateway (Paystack secret keys), didit_settings (API/webhook secrets), email_2fa
+    match /app_settings/{otherDoc} {
+      allow read, write: if false;
+      match /{sub=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /payment_gateway/{docId} {
+      allow read, write: if false;
+    }
+
+    match /Settings/{settingId} {
+      allow read, write: if false;
+    }
+
+    // 7. Didit Webhook Audit Collections & Admin 2FA Internals (Admin SDK / Cloud Functions ONLY)
+    match /DiditWebhookEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /DiditWebhookLogs/{logId} {
+      allow read, write: if false;
+    }
+
+    match /admin_2fa_secrets/{secretId} {
+      allow read, write: if false;
+    }
+
+    match /admin_2fa_challenges/{challengeId} {
+      allow read, write: if false;
+    }
+
+    match /server_internal/{docId} {
+      allow read, write: if false;
+    }
+
+    // 8. Payments Collection (Written by Paystack Cloud Functions via Admin SDK ONLY)
+    match /Payments/{reference} {
+      allow read: if isAuthenticated() && (resource.data.get('userId', '') == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
+    // 9. Support Tickets (Both Shippers & Drivers)
+    match /support_tickets/{ticketId} {
+      allow read: if isAuthenticated() && (
+        resource.data.get('driverId', '') == request.auth.uid ||
+        resource.data.get('userId', '') == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && isValidSupportTicket(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+
+    // 10. Account Deletion Requests (Both Shippers & Drivers)
+    match /account_deletion_requests/{requestId} {
+      allow read: if isAuthenticated() && (
+        resource.data.get('driverId', '') == request.auth.uid ||
+        resource.data.get('userId', '') == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && isValidAccountDeletionRequest(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // Default Deny Everything Else
+    // =========================================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

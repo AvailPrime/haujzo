@@ -1,0 +1,35 @@
+class AvailRoutes {
+  static const navigationMenu = '/';
+  static const home = '/home';
+  static const settings = '/settings';
+  static const userProfile = '/user-profile';
+  static const userAddress = '/user-address';
+  static const signup = '/signup';
+  static const signupSuccess = '/signup-success';
+  static const verifyEmail = '/verify-email';
+  static const signIn = '/sign-in';
+  static const resetPassword = '/reset-password';
+  static const forgotPassword = '/forgot-password';
+  static const onBoarding = '/on-boarding';
+  static const paymentSuccess = '/payment-success';
+  static const noNetwork = '/no-network';
+  static const driverDashboard = '/driver-dashboard';
+  static const driverNavigationMenu = '/driver-navigation-menu';
+  static const myBookings = '/my-bookings';
+  static const jobDispatch = '/job-dispatch';
+  static const termsOfService = '/terms-of-service';
+  static const privacyPolicy = '/privacy-policy';
+  static const aboutUs = '/about-us';
+  static const helpSupport = '/help-support';
+  static const privacySettings = '/privacy-settings';
+  static const truckDetails = '/truck-details';
+  static const userPaymentMethods = '/payment-methods';
+  static const addNewPayment = '/add-payment';
+  static const addNewAddress = '/add-address';
+  static const notifications = '/notifications';
+  static const diditVerification = '/identity-verification';
+  static const bookingDetails = '/booking-details';
+  static const changeName = '/change-name';
+  static const changeUsername = '/change-username';
+  static const changePhoneNumber = '/change-phone-number';
+}

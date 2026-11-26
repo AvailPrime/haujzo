@@ -1,0 +1,68 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+/coverage/
+
+# Symbolication & Obfuscation related
+app.*.symbols
+app.*.map.json
+
+# Android specific
+android/.gradle/
+android/app/build/
+android/.kotlin/
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Android Release Signing Credentials (Keep private!)
+/android/key.properties
+/android/app/*.jks
+/android/app/*.keystore
+
+# JVM crash dumps
+/android/hs_err_pid*.log
+/android/replay_pid*.log
+/android/java_pid*.hprof
+
+# iOS specific
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# IDEs
+.idea/
+.vs/
+*.iml
+*.ipr
+*.iws
+
+# Custom / Temp / Cloud Functions / Firebase cache
+.artifacts/
+.firebase/
+.env
+node_modules/
+.next/
+dist/

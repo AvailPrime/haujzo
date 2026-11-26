@@ -1,0 +1,16 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Allow authenticated users (shippers, drivers, admins) full access across Firebase Storage
+    // (including booking_documents, driver_profiles, Users/Images/Profile, voice_notes, etc.)
+    match /{allPaths=**} {
+      allow read, write: if isSignedIn();
+    }
+  }
+}

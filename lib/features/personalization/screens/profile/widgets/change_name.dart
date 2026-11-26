@@ -1,0 +1,167 @@
+import '../../../../../commons/widgets/appBar/appbar.dart';
+import '../../../../../commons/widgets/layouts/site_layout.dart';
+import 'package:flutter/material.dart';
+import 'package:iconsax/iconsax.dart';
+import 'package:get/get.dart';
+
+import '../../../../../utils/constants/colors.dart';
+import '../../../../../utils/constants/sizes.dart';
+import '../../../../../utils/constants/text_strings.dart';
+import '../../../../../utils/helpers/helper_functions.dart';
+import '../../../../../utils/validators/validator.dart';
+import '../../../controllers/update_name_controller.dart';
+
+class ChangeName extends StatelessWidget {
+  const ChangeName({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = Get.put(UpdateNameController());
+    final dark = AvailHelperFunctions.isDarkMode(context);
+
+    return Scaffold(
+      backgroundColor: dark ? AvailColors.dark : const Color(0xFFF1F5F9),
+      appBar: const AvailAppbar(
+        showBackArrow: true,
+        showBackgroundColor: true,
+        backgroundColor: Color(0xFF0B1D35),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'UPDATE LEGAL NAME',
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.2,
+                color: Colors.white,
+              ),
+            ),
+            Text(
+              'Shipper Waybill & KYC Identity',
+              style: TextStyle(
+                fontSize: 10,
+                color: Colors.white70,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+      body: MaxWidthContainer(
+        maxWidth: 540,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(AvailSizes.defaultSpace),
+          child: Container(
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              color: dark ? const Color(0xFF132238) : Colors.white,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: dark ? const Color(0xFF1E3A5F) : const Color(0xFFE2E8F0),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: dark ? 0.25 : 0.04),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: AvailColors.primary.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                      child: const Icon(
+                        Iconsax.user_edit,
+                        color: AvailColors.primary,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Full Legal Name',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: dark ? Colors.white : AvailColors.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Use your real legal name for seamless KYC verification and official freight waybills.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: dark ? Colors.grey.shade400 : AvailColors.darkgrey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                Form(
+                  key: controller.updateUserNameFormKey,
+                  child: Column(
+                    children: [
+                      TextFormField(
+                        controller: controller.firstName,
+                        validator: (value) =>
+                            AvailValidator.validateEmptyText('First name', value),
+                        decoration: const InputDecoration(
+                          labelText: AvailTexts.firstName,
+                          prefixIcon: Icon(Iconsax.user),
+                        ),
+                      ),
+                      const SizedBox(height: AvailSizes.spacebtwinputfield),
+                      TextFormField(
+                        controller: controller.lastName,
+                        validator: (value) =>
+                            AvailValidator.validateEmptyText('Last name', value),
+                        expands: false,
+                        decoration: const InputDecoration(
+                          labelText: AvailTexts.lastName,
+                          prefixIcon: Icon(Iconsax.user),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: ElevatedButton.icon(
+                          onPressed: () => controller.updateUserName(),
+                          icon: const Icon(Iconsax.tick_circle, size: 18, color: Colors.white),
+                          label: const Text(
+                            'Save Legal Name',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
