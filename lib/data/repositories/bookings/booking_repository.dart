@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import '../../../features/shop/models/booking_model.dart';
@@ -51,31 +52,61 @@ class BookingRepository extends GetxController {
 
   /// Save new booking
   Future<String> saveBooking(BookingModel booking) async {
+    final payload = booking.toJson();
     try {
-      final docRef = await _db.collection('bookings').add(booking.toJson());
+      debugPrint('[BOOKING REPO] Attempting Firestore bookings.add(...) for bookingId=${booking.bookingId}, userId=${booking.userId}');
+      final docRef = await _db.collection('bookings').add(payload);
+      debugPrint('[BOOKING REPO] ✅ Successfully created booking document: bookings/${docRef.id}');
       return docRef.id;
-    } on FirebaseException catch (e) {
+    } on FirebaseException catch (e, stack) {
+      debugPrint('============================================================');
+      debugPrint('[BOOKING REPO ERROR] ❌ Firestore saveBooking FirebaseException!');
+      debugPrint('  plugin : ${e.plugin}');
+      debugPrint('  code   : ${e.code}');
+      debugPrint('  message: ${e.message}');
+      debugPrint('  uid    : ${AuthenticationRepository.instance.authUser?.uid}');
+      debugPrint('  payload keys (${payload.keys.length}): ${payload.keys.toList()}');
+      debugPrint('  stack  : $stack');
+      debugPrint('============================================================');
       throw AvailFirebaseException(e.code).message;
-    } on PlatformException catch (e) {
+    } on PlatformException catch (e, stack) {
+      debugPrint('[BOOKING REPO ERROR] ❌ saveBooking PlatformException: code=${e.code}, message=${e.message}\n$stack');
       throw AvailPlatformException(e.code).message;
     } on AvailFormatException catch (e) {
+      debugPrint('[BOOKING REPO ERROR] ❌ saveBooking AvailFormatException: ${e.message}');
       throw e.message;
-    } catch (e) {
+    } catch (e, stack) {
+      debugPrint('[BOOKING REPO ERROR] ❌ saveBooking Unexpected error: $e\n$stack');
       throw 'Something went wrong. Please try again';
     }
   }
 
   /// Update existing booking
   Future<void> updateBooking(BookingModel booking) async {
+    final payload = booking.toJson();
     try {
-      await _db.collection('bookings').doc(booking.id).update(booking.toJson());
-    } on FirebaseException catch (e) {
+      debugPrint('[BOOKING REPO] Attempting Firestore bookings.doc(${booking.id}).update(...)');
+      await _db.collection('bookings').doc(booking.id).update(payload);
+      debugPrint('[BOOKING REPO] ✅ Successfully updated booking document: bookings/${booking.id}');
+    } on FirebaseException catch (e, stack) {
+      debugPrint('============================================================');
+      debugPrint('[BOOKING REPO ERROR] ❌ Firestore updateBooking FirebaseException!');
+      debugPrint('  docId  : ${booking.id}');
+      debugPrint('  plugin : ${e.plugin}');
+      debugPrint('  code   : ${e.code}');
+      debugPrint('  message: ${e.message}');
+      debugPrint('  uid    : ${AuthenticationRepository.instance.authUser?.uid}');
+      debugPrint('  stack  : $stack');
+      debugPrint('============================================================');
       throw AvailFirebaseException(e.code).message;
-    } on PlatformException catch (e) {
+    } on PlatformException catch (e, stack) {
+      debugPrint('[BOOKING REPO ERROR] ❌ updateBooking PlatformException: code=${e.code}, message=${e.message}\n$stack');
       throw AvailPlatformException(e.code).message;
     } on AvailFormatException catch (e) {
+      debugPrint('[BOOKING REPO ERROR] ❌ updateBooking AvailFormatException: ${e.message}');
       throw e.message;
-    } catch (e) {
+    } catch (e, stack) {
+      debugPrint('[BOOKING REPO ERROR] ❌ updateBooking Unexpected error: $e\n$stack');
       throw 'Something went wrong. Please try again';
     }
   }

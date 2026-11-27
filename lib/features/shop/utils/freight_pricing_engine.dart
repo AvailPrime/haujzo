@@ -343,7 +343,7 @@ class FreightPricingEngine {
     bool isFragile = false,
     bool isHazardous = false,
     bool requiresLoadingAssistance = false,
-    String currency = 'USD',
+    String currency = 'GHS',
     double exchangeRate = 1.0,
   }) {
     return calculatePrice(

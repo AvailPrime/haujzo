@@ -119,6 +119,28 @@ class AppUserRepository extends GetxController{
     }
   }
 
+  String _resolveImageContentType(String fileName) {
+    final ext = fileName.contains('.')
+        ? fileName.split('.').last.toLowerCase()
+        : '';
+    switch (ext) {
+      case 'png':
+        return 'image/png';
+      case 'webp':
+        return 'image/webp';
+      case 'gif':
+        return 'image/gif';
+      case 'heic':
+        return 'image/heic';
+      case 'heif':
+        return 'image/heif';
+      case 'jpg':
+      case 'jpeg':
+      default:
+        return 'image/jpeg';
+    }
+  }
+
   /// upload any image
   Future<String> uploadImage(String path, XFile image) async {
     try {
@@ -128,7 +150,10 @@ class AppUserRepository extends GetxController{
 
       final ref = FirebaseStorage.instance.ref(path).child(uniqueFileName);
 
-      await ref.putFile(File(image.path));
+      await ref.putFile(
+        File(image.path),
+        SettableMetadata(contentType: _resolveImageContentType(image.name)),
+      );
 
       // Always return the download URL of the uploaded file
       final url = await ref.getDownloadURL();

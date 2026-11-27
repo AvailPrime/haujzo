@@ -13,6 +13,7 @@ import '../chat/trip_chat_screen.dart';
 import '../customer_home/job_dispatch_screen.dart';
 import 'booking_details_screen.dart';
 import 'widgets/cancel_refund_dialog.dart';
+import '../../../../commons/widgets/images/driver_profile_avatar.dart';
 import 'package:truck_booking/navigation_menu.dart';
 import '../../../../routes/routes.dart';
 import '../../../../commons/widgets/layouts/site_layout.dart';
@@ -231,39 +232,65 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
               ),
         floatingActionButton: isEmbedded
             ? null
-            : Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  gradient: AvailColors.lineargradient,
-                  boxShadow: [
-                    BoxShadow(
-                      color: AvailColors.primary.withValues(alpha: 0.4),
-                      blurRadius: 16,
-                      offset: const Offset(0, 6),
+            : Tooltip(
+                message: 'Create New Dispatch',
+                child: Container(
+                  height: 42,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(24),
+                    gradient: AvailColors.lineargradient,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.22),
+                      width: 1,
                     ),
-                  ],
-                ),
-                child: FloatingActionButton.extended(
-                  onPressed: () {
-                    if (!CustomerHomeController.instance
-                        .checkShipperVerificationAndApproval()) {
-                      return;
-                    }
-                    CustomerHomeController.instance.resetForm();
-                    _openJobDispatch();
-                  },
-                  backgroundColor: Colors.transparent,
-                  elevation: 0,
-                  highlightElevation: 0,
-                  icon: const Icon(Iconsax.add_circle,
-                      color: Colors.white, size: 20),
-                  label: const Text(
-                    'NEW DISPATCH',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white,
-                      fontSize: 12,
-                      letterSpacing: 0.9,
+                    boxShadow: [
+                      BoxShadow(
+                        color: AvailColors.primary.withValues(alpha: 0.35),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.12),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(24),
+                      onTap: () {
+                        if (!CustomerHomeController.instance
+                            .checkShipperVerificationAndApproval()) {
+                          return;
+                        }
+                        CustomerHomeController.instance.resetForm();
+                        _openJobDispatch();
+                      },
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.add_rounded,
+                              color: Colors.white,
+                              size: 19,
+                            ),
+                            SizedBox(width: 6),
+                            Text(
+                              'New Dispatch',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                                fontSize: 12.5,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -358,7 +385,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
                 ),
                 const SizedBox(width: 14),
                 SizedBox(
-                  height: 46,
+                  height: 42,
                   child: ElevatedButton.icon(
                     onPressed: () {
                       if (!CustomerHomeController.instance
@@ -368,22 +395,22 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
                       CustomerHomeController.instance.resetForm();
                       _openJobDispatch();
                     },
-                    icon: const Icon(Iconsax.add_circle,
+                    icon: const Icon(Icons.add_rounded,
                         color: Colors.white, size: 18),
                     label: const Text(
-                      'NEW DISPATCH',
+                      'New Dispatch',
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
                         color: Colors.white,
-                        fontSize: 12,
-                        letterSpacing: 0.6,
+                        fontSize: 12.5,
+                        letterSpacing: 0.3,
                       ),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AvailColors.primary,
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(12),
                       ),
                     ),
                   ),
@@ -1284,17 +1311,22 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
               ),
               child: Row(
                 children: [
-                  Container(
-                    width: 30,
-                    height: 30,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0284C7).withValues(alpha: 0.2),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Iconsax.user_tick,
-                      size: 15,
-                      color: Color(0xFF0284C7),
+                  DriverProfileAvatar(
+                    driverImage: booking.driverImage,
+                    driverId: booking.driverId,
+                    radius: 15,
+                    fallbackWidget: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0284C7).withValues(alpha: 0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Iconsax.user_tick,
+                        size: 15,
+                        color: Color(0xFF0284C7),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -1329,27 +1361,66 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
                       ],
                     ),
                   ),
-                  Stack(
-                    clipBehavior: Clip.none,
-                    children: [
+                  if (booking.canChatWithDriver) ...[
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        GestureDetector(
+                          onTap: () =>
+                              Get.to(() => TripChatScreen(booking: booking)),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: AvailColors.primary,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Iconsax.messages_2,
+                                    size: 12, color: Colors.white),
+                                SizedBox(width: 4),
+                                Text(
+                                  'CHAT',
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: -4,
+                          top: -4,
+                          child: ShipperUnreadChatBadge(
+                              booking: booking, compact: true),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 6),
+                    if (booking.driverPhone != null &&
+                        booking.driverPhone!.isNotEmpty)
                       GestureDetector(
-                        onTap: () =>
-                            Get.to(() => TripChatScreen(booking: booking)),
+                        onTap: () => CustomerHomeController.instance
+                            .callDriver(booking.driverPhone),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 6),
                           decoration: BoxDecoration(
-                            color: AvailColors.primary,
+                            color: const Color(0xFF10B981),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Iconsax.messages_2,
-                                  size: 12, color: Colors.white),
+                              Icon(Iconsax.call5, size: 12, color: Colors.white),
                               SizedBox(width: 4),
                               Text(
-                                'CHAT',
+                                'CALL',
                                 style: TextStyle(
                                   fontSize: 9.5,
                                   fontWeight: FontWeight.w900,
@@ -1360,42 +1431,37 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
                           ),
                         ),
                       ),
-                      Positioned(
-                        right: -4,
-                        top: -4,
-                        child: ShipperUnreadChatBadge(
-                            booking: booking, compact: true),
+                  ] else
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 9, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: (darkMode ? Colors.white : Colors.black)
+                            .withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(20),
                       ),
-                    ],
-                  ),
-                  const SizedBox(width: 6),
-                  if (booking.driverPhone != null &&
-                      booking.driverPhone!.isNotEmpty)
-                    GestureDetector(
-                      onTap: () => CustomerHomeController.instance
-                          .callDriver(booking.driverPhone),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF10B981),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Iconsax.call5, size: 12, color: Colors.white),
-                            SizedBox(width: 4),
-                            Text(
-                              'CALL',
-                              style: TextStyle(
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.w900,
-                                color: Colors.white,
-                              ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Iconsax.lock,
+                            size: 11,
+                            color: darkMode
+                                ? Colors.grey.shade400
+                                : Colors.grey.shade600,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'CHAT CLOSED',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              color: darkMode
+                                  ? Colors.grey.shade400
+                                  : Colors.grey.shade600,
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                 ],
@@ -1437,13 +1503,15 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
                       ),
                     ),
                     const SizedBox(height: 1),
-                    Text(
-                      LocalizationController.instance
-                          .getFormattedPrice(booking.price),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 16.5,
-                        color: AvailColors.primary,
+                    Obx(
+                      () => Text(
+                        LocalizationController.instance
+                            .getFormattedPrice(booking.price),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16.5,
+                          color: AvailColors.primary,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -1718,132 +1786,209 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
       );
     }
 
+    final Color completedColor = const Color(0xFF10B981);
+    final Color currentColor =
+        activeIndex == 4 ? completedColor : AvailColors.primary;
+    final Color inactiveLineColor = darkMode
+        ? const Color(0xFF1E293B)
+        : const Color(0xFFE2E8F0);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Header: Stage count indicator and status pill
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              'LIFECYCLE STAGE ${activeIndex + 1} OF 5',
-              style: TextStyle(
-                fontSize: 8.5,
-                fontWeight: FontWeight.w900,
-                color: darkMode ? Colors.grey.shade400 : Colors.grey.shade600,
-                letterSpacing: 0.8,
-              ),
+            Row(
+              children: [
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: currentColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'LIFECYCLE STAGE ${activeIndex + 1} OF 5',
+                  style: TextStyle(
+                    fontSize: 8.5,
+                    fontWeight: FontWeight.w900,
+                    color:
+                        darkMode ? Colors.grey.shade400 : Colors.grey.shade600,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ],
             ),
-            Text(
-              stages[activeIndex]['label']!.toUpperCase(),
-              style: TextStyle(
-                fontSize: 9.5,
-                fontWeight: FontWeight.w900,
-                color: activeIndex == 4
-                    ? const Color(0xFF10B981)
-                    : AvailColors.primary,
-                letterSpacing: 0.5,
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+              decoration: BoxDecoration(
+                color: currentColor.withValues(alpha: darkMode ? 0.20 : 0.10),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: currentColor.withValues(alpha: 0.25),
+                  width: 1,
+                ),
+              ),
+              child: Text(
+                stages[activeIndex]['label']!.toUpperCase(),
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w900,
+                  color: currentColor,
+                  letterSpacing: 0.5,
+                ),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
 
-        // Stepper Nodes & Connector Bars
+        // Perfectly Aligned Linear Lifecycle Stepper & Labels
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: List.generate(stages.length, (index) {
             final bool isPassed = index < activeIndex;
             final bool isCurrent = index == activeIndex;
 
             return Expanded(
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    width: 20,
-                    height: 20,
-                    decoration: BoxDecoration(
-                      color: isPassed
-                          ? const Color(0xFF10B981)
-                          : (isCurrent
-                              ? AvailColors.primary
-                              : (darkMode
-                                  ? const Color(0xFF1E3A5F)
-                                  : Colors.grey.shade200)),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: isCurrent
-                            ? AvailColors.primary
-                            : (isPassed
-                                ? const Color(0xFF10B981)
-                                : (darkMode
-                                    ? const Color(0xFF334155)
-                                    : Colors.grey.shade300)),
-                        width: isCurrent ? 2 : 1,
-                      ),
-                      boxShadow: isCurrent
-                          ? [
-                              BoxShadow(
-                                color:
-                                    AvailColors.primary.withValues(alpha: 0.4),
-                                blurRadius: 8,
-                                spreadRadius: 1,
-                              ),
-                            ]
-                          : null,
-                    ),
-                    child: Center(
-                      child: isPassed
-                          ? const Icon(Icons.check,
-                              size: 12, color: Colors.white)
-                          : Text(
-                              stages[index]['step']!,
-                              style: TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w900,
-                                color: isCurrent
-                                    ? Colors.white
-                                    : (darkMode
-                                        ? Colors.grey.shade400
-                                        : Colors.grey.shade600),
-                              ),
+                  // Node Row: Left connector line, Circle Node, Right connector line
+                  SizedBox(
+                    height: 24,
+                    child: Row(
+                      children: [
+                        // Left Connector Line
+                        Expanded(
+                          child: Container(
+                            height: 2.5,
+                            decoration: BoxDecoration(
+                              color: index == 0
+                                  ? Colors.transparent
+                                  : (index <= activeIndex
+                                      ? completedColor
+                                      : inactiveLineColor),
+                              borderRadius: index == 1
+                                  ? const BorderRadius.horizontal(
+                                      left: Radius.circular(2))
+                                  : BorderRadius.zero,
                             ),
+                          ),
+                        ),
+
+                        // Circle Node
+                        Container(
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            color: isPassed
+                                ? completedColor
+                                : (isCurrent
+                                    ? currentColor
+                                    : (darkMode
+                                        ? const Color(0xFF0F172A)
+                                        : const Color(0xFFF8FAFC))),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isPassed
+                                  ? completedColor
+                                  : (isCurrent
+                                      ? currentColor
+                                      : (darkMode
+                                          ? const Color(0xFF334155)
+                                          : const Color(0xFFCBD5E1))),
+                              width: isCurrent ? 2 : 1.2,
+                            ),
+                            boxShadow: isCurrent
+                                ? [
+                                    BoxShadow(
+                                      color:
+                                          currentColor.withValues(alpha: 0.35),
+                                      blurRadius: 7,
+                                      spreadRadius: 1,
+                                    ),
+                                  ]
+                                : null,
+                          ),
+                          child: Center(
+                            child: isPassed || (isCurrent && activeIndex == 4)
+                                ? const Icon(
+                                    Icons.check_rounded,
+                                    size: 13,
+                                    color: Colors.white,
+                                  )
+                                : Text(
+                                    stages[index]['step']!,
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w900,
+                                      color: isCurrent
+                                          ? Colors.white
+                                          : (darkMode
+                                              ? Colors.grey.shade400
+                                              : Colors.grey.shade500),
+                                    ),
+                                  ),
+                          ),
+                        ),
+
+                        // Right Connector Line
+                        Expanded(
+                          child: Container(
+                            height: 2.5,
+                            decoration: BoxDecoration(
+                              color: index == stages.length - 1
+                                  ? Colors.transparent
+                                  : (index < activeIndex
+                                      ? completedColor
+                                      : inactiveLineColor),
+                              borderRadius: index == stages.length - 2
+                                  ? const BorderRadius.horizontal(
+                                      right: Radius.circular(2))
+                                  : BorderRadius.zero,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  if (index != stages.length - 1)
-                    Expanded(
-                      child: Container(
-                        height: 3,
-                        decoration: BoxDecoration(
-                          color: isPassed
-                              ? const Color(0xFF10B981)
-                              : (darkMode
-                                  ? const Color(0xFF1E3A5F)
-                                  : Colors.grey.shade200),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
+                  const SizedBox(height: 6),
+
+                  // Status Label - Exactly centered directly under its node circle
+                  Container(
+                    height: 26,
+                    alignment: Alignment.topCenter,
+                    padding: const EdgeInsets.symmetric(horizontal: 1),
+                    child: Text(
+                      stages[index]['label']!,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 8.5,
+                        height: 1.15,
+                        fontWeight: isCurrent
+                            ? FontWeight.w900
+                            : (isPassed ? FontWeight.w700 : FontWeight.w500),
+                        color: isCurrent
+                            ? currentColor
+                            : (isPassed
+                                ? (darkMode
+                                    ? Colors.grey.shade200
+                                    : const Color(0xFF1E293B))
+                                : (darkMode
+                                    ? Colors.grey.shade500
+                                    : const Color(0xFF94A3B8))),
                       ),
                     ),
+                  ),
                 ],
-              ),
-            );
-          }),
-        ),
-        const SizedBox(height: 5),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: List.generate(stages.length, (index) {
-            final bool isPassed = index < activeIndex;
-            final bool isCurrent = index == activeIndex;
-            return Text(
-              stages[index]['label']!,
-              style: TextStyle(
-                fontSize: 8.5,
-                fontWeight:
-                    isCurrent || isPassed ? FontWeight.w800 : FontWeight.w500,
-                color: isCurrent
-                    ? AvailColors.primary
-                    : (isPassed
-                        ? const Color(0xFF10B981)
-                        : Colors.grey.shade500),
               ),
             );
           }),

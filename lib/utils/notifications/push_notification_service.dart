@@ -9,13 +9,16 @@ import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import '../../data/repositories/authentication/authentication_repository.dart';
-import '../../data/repositories/bookings/booking_repository.dart';
-import '../../features/shop/screens/bookings/booking_details_screen.dart';
-import '../../routes/routes.dart';
+import '../../features/personalization/controllers/notification_controller.dart';
+import '../../features/personalization/models/notification_model.dart';
 import 'trip_payment_alert_service.dart';
 
 class PushNotificationService extends GetxController {
   static PushNotificationService get instance => Get.find();
+
+  /// Tracks the booking ID currently open in TripChatScreen so we don't fire
+  /// redundant local alert banners for the conversation the user is already viewing.
+  static String? activeChatBookingId;
 
   final FirebaseMessaging _fcm = FirebaseMessaging.instance;
   final FlutterLocalNotificationsPlugin _localNotificationsPlugin = FlutterLocalNotificationsPlugin();
@@ -24,21 +27,28 @@ class PushNotificationService extends GetxController {
   RxBool isPermissionGranted = false.obs;
   StreamSubscription? _authSubscription;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _bookingsSubscription;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _userNotificationsSubscription;
   final Map<String, String> _lastKnownStatuses = {};
+  final Set<String> _seenNotificationIds = {};
+  bool _hasInitializedNotifListener = false;
 
   @override
   void onInit() {
     super.onInit();
     initialize();
 
-    // Listen to Auth State changes to bind FCM token
+    // Listen to Auth State changes to bind FCM token and real-time listeners
     _authSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
       if (user != null) {
         syncFCMToken();
         listenToUserBookingsForNotifications(user.uid);
+        listenToIncomingChatNotifications(user.uid);
       } else {
         _bookingsSubscription?.cancel();
+        _userNotificationsSubscription?.cancel();
         _lastKnownStatuses.clear();
+        _seenNotificationIds.clear();
+        _hasInitializedNotifListener = false;
       }
     });
   }
@@ -47,6 +57,7 @@ class PushNotificationService extends GetxController {
   void onClose() {
     _authSubscription?.cancel();
     _bookingsSubscription?.cancel();
+    _userNotificationsSubscription?.cancel();
     super.onClose();
   }
 
@@ -161,6 +172,16 @@ class PushNotificationService extends GetxController {
     AndroidNotification? android = message.notification?.android;
 
     if (notification != null) {
+      final targetId = (message.data['targetId'] ?? message.data['bookingId'] ?? '').toString();
+      final type = (message.data['type'] ?? 'general').toString();
+
+      // Suppress foreground banner if user is already viewing this exact chat
+      if ((type.toLowerCase() == 'chat' || type.toLowerCase() == 'message') &&
+          targetId.isNotEmpty &&
+          activeChatBookingId == targetId) {
+        return;
+      }
+
       String? imageUrl = android?.imageUrl ?? message.data['image'];
       BigPictureStyleInformation? bigPictureStyle;
 
@@ -195,7 +216,7 @@ class PushNotificationService extends GetxController {
         notification.title,
         notification.body,
         platformChannelSpecifics,
-        payload: '${message.data['type'] ?? 'general'}|${message.data['targetId'] ?? ''}',
+        payload: '$type|$targetId',
       );
     }
   }
@@ -217,43 +238,77 @@ class PushNotificationService extends GetxController {
     final parts = payload.split('|');
     if (parts.length >= 2) {
       final type = parts[0];
-      final targetId = parts[1];
+      final targetId = parts.sublist(1).join('|');
       _navigateToScreen(type, targetId);
     }
   }
 
   void _handleNotificationClickFromData(Map<String, dynamic> data) {
-    if (data.containsKey('type')) {
-      _navigateToScreen(data['type'], data['targetId'] ?? '');
+    final type = (data['type'] ?? 'general').toString();
+    final targetId = (data['targetId'] ?? data['bookingId'] ?? '').toString();
+    if (type.isNotEmpty || targetId.isNotEmpty) {
+      _navigateToScreen(type, targetId);
     }
   }
 
-  void _navigateToScreen(String type, String targetId) async {
-    if ((type == 'booking' || type == 'job' || type == 'order' || type == 'booking_payment_due') &&
-        targetId.isNotEmpty) {
-      try {
-        final bookingRepository = Get.find<BookingRepository>();
-        final booking = await bookingRepository.fetchBookingById(targetId);
-        if (booking != null) {
-          Get.to(
-            () => BookingDetailsScreen(
-              booking: booking,
-              openPaymentSheetOnLoad: type == 'booking_payment_due' && !booking.isPaidOnline,
-            ),
-            routeName: AvailRoutes.bookingDetails,
-          );
-        }
-      } catch (e) {
-        // Error handling
-      }
-    } else if (type == 'banner' && targetId.isNotEmpty) {
-      Get.toNamed(targetId);
-    }
+  Future<void> _navigateToScreen(String type, String targetId) async {
+    await NotificationController.routeNotification(
+      type: type,
+      targetId: targetId,
+    );
   }
 
   Future<void> checkPermissionStatus() async {
     NotificationSettings settings = await _fcm.getNotificationSettings();
     isPermissionGranted.value = settings.authorizationStatus == AuthorizationStatus.authorized;
+  }
+
+  /// Listens to newly added unread chat notifications in Users/{uid}/Notifications
+  /// so incoming driver messages show a tappable local notification banner that opens chat.
+  void listenToIncomingChatNotifications(String userId) {
+    _userNotificationsSubscription?.cancel();
+    _seenNotificationIds.clear();
+    _hasInitializedNotifListener = false;
+
+    _userNotificationsSubscription = _db
+        .collection('Users')
+        .doc(userId)
+        .collection('Notifications')
+        .orderBy('timestamp', descending: true)
+        .limit(25)
+        .snapshots()
+        .listen(
+      (snapshot) {
+        if (!_hasInitializedNotifListener) {
+          for (final doc in snapshot.docs) {
+            _seenNotificationIds.add(doc.id);
+          }
+          _hasInitializedNotifListener = true;
+          return;
+        }
+
+        for (final change in snapshot.docChanges) {
+          if (change.type != DocumentChangeType.added) continue;
+          if (_seenNotificationIds.contains(change.doc.id)) continue;
+          _seenNotificationIds.add(change.doc.id);
+
+          final notif = NotificationModel.fromSnapshot(change.doc);
+          if (notif.isRead || !notif.isChatNotification) continue;
+
+          // Skip if the user is already inside this chat screen
+          if (notif.hasTarget && activeChatBookingId == notif.targetId) {
+            continue;
+          }
+
+          _showCustomLocalNotification(
+            notif.title.isNotEmpty ? notif.title : 'New Message from Driver 💬',
+            notif.body.isNotEmpty ? notif.body : 'Tap to open trip chat.',
+            payload: 'chat|${notif.targetId ?? ''}',
+          );
+        }
+      },
+      onError: (_) {},
+    );
   }
 
   bool _isLoadedOrInTransitStatus(String status) {

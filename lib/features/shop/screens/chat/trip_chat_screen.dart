@@ -20,6 +20,7 @@ import 'package:record/record.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../utils/constants/colors.dart';
 import '../../../../utils/helpers/helper_functions.dart';
+import '../../../../utils/notifications/push_notification_service.dart';
 import '../../controllers/customer/customer_home_controller.dart';
 import '../../models/booking_model.dart';
 
@@ -45,8 +46,7 @@ class ShipperUnreadChatBadge extends StatelessWidget {
             ? '${activeDriverId}_session'
             : 'default_session');
 
-    if (booking.id.isEmpty ||
-        (booking.driverId == null || booking.driverId!.isEmpty)) {
+    if (booking.id.isEmpty || !booking.canChatWithDriver) {
       return const SizedBox.shrink();
     }
 
@@ -525,9 +525,13 @@ class _TripChatScreenState extends State<TripChatScreen>
     {'icon': Iconsax.verify, 'text': 'Thank you for the update!'},
   ];
 
+  bool _isBookingChatLocked = false;
+
   @override
   void initState() {
     super.initState();
+    _isBookingChatLocked = !widget.booking.canChatWithDriver;
+    PushNotificationService.activeChatBookingId = widget.booking.id;
     _bookingStream = FirebaseFirestore.instance
         .collection('bookings')
         .doc(widget.booking.id)
@@ -546,7 +550,12 @@ class _TripChatScreenState extends State<TripChatScreen>
 
   @override
   void dispose() {
-    _setTypingStatus(false);
+    if (PushNotificationService.activeChatBookingId == widget.booking.id) {
+      PushNotificationService.activeChatBookingId = null;
+    }
+    if (!_isBookingChatLocked) {
+      _setTypingStatus(false);
+    }
     _typingDebounce?.cancel();
     _updateShipperPresence(false);
     recordTimer?.cancel();
@@ -573,7 +582,7 @@ class _TripChatScreenState extends State<TripChatScreen>
 
   void _onTextChanged(String val, String sessionId) {
     setState(() {});
-    if (sessionId.isEmpty) return;
+    if (_isBookingChatLocked || sessionId.isEmpty) return;
 
     if (val.trim().isNotEmpty && !_isCurrentlyTyping) {
       _setTypingStatus(true, sessionId: sessionId);
@@ -588,6 +597,10 @@ class _TripChatScreenState extends State<TripChatScreen>
   }
 
   void _setTypingStatus(bool typing, {String? sessionId}) {
+    if (_isBookingChatLocked) {
+      _isCurrentlyTyping = false;
+      return;
+    }
     _isCurrentlyTyping = typing;
     final targetSession = sessionId ?? _currentStreamSessionId;
     if (targetSession == null || targetSession.isEmpty) return;
@@ -1413,7 +1426,8 @@ class _TripChatScreenState extends State<TripChatScreen>
   // --- EDIT & DELETE UNSEEN MESSAGES LOGIC FOR SHIPPER ---
 
   void _showOptionModal(String docId, Map<String, dynamic> data,
-      String senderName, String targetSessionId, bool isMe) {
+      String senderName, String targetSessionId, bool isMe,
+      {bool isChatLocked = false}) {
     final isDark = AvailHelperFunctions.isDarkMode(context);
     final status = data['status']?.toString().toLowerCase();
     final isSeen =
@@ -1422,8 +1436,8 @@ class _TripChatScreenState extends State<TripChatScreen>
     final isText = msgType == 'text' &&
         !(data['text']?.toString().contains('Voice Note') ?? false);
 
-    final canEdit = isMe && !isSeen && isText;
-    final canDelete = isMe && !isSeen;
+    final canEdit = !isChatLocked && isMe && !isSeen && isText;
+    final canDelete = !isChatLocked && isMe && !isSeen;
     final text = data['text']?.toString() ?? '';
 
     showModalBottomSheet(
@@ -1444,19 +1458,20 @@ class _TripChatScreenState extends State<TripChatScreen>
                   borderRadius: BorderRadius.circular(10)),
             ),
             const SizedBox(height: 8),
-            ListTile(
-              leading:
-                  const Icon(Icons.reply_rounded, color: AvailColors.primary),
-              title: Text('Reply to Message',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                      color: isDark ? Colors.white : Colors.black87)),
-              onTap: () {
-                Navigator.pop(ctx);
-                _setReplyMessage(docId, text, senderName);
-              },
-            ),
+            if (!isChatLocked)
+              ListTile(
+                leading:
+                    const Icon(Icons.reply_rounded, color: AvailColors.primary),
+                title: Text('Reply to Message',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: isDark ? Colors.white : Colors.black87)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _setReplyMessage(docId, text, senderName);
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.copy_rounded, color: Colors.blue),
               title: Text('Copy Message Text',
@@ -1724,10 +1739,11 @@ class _TripChatScreenState extends State<TripChatScreen>
                     ? '${activeDriverId}_session'
                     : 'default_session'));
 
-        final status = booking.status.toLowerCase().trim();
-        final isCompleted = status == 'delivered' || status == 'completed';
-        final isCancelled = status == 'cancelled' || status == 'canceled';
-        final isChatLocked = isCompleted || isCancelled;
+        final isCompleted = booking.isCompleted;
+        final isCancelled = booking.isCancelled;
+        final isUnassigned = !booking.canChatWithDriver && !isCompleted && !isCancelled;
+        final isChatLocked = !booking.canChatWithDriver;
+        _isBookingChatLocked = isChatLocked;
 
         if (_currentStreamSessionId != activeChatSessionId) {
           _currentStreamSessionId = activeChatSessionId;
@@ -1791,24 +1807,25 @@ class _TripChatScreenState extends State<TripChatScreen>
                         ),
                       ),
                     ),
-                    Positioned(
-                      right: 0,
-                      bottom: 0,
-                      child: Container(
-                        width: 11,
-                        height: 11,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF10B981),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: isDark
-                                ? const Color(0xFF122F51)
-                                : Colors.white,
-                            width: 1.8,
+                    if (!isChatLocked)
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          width: 11,
+                          height: 11,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isDark
+                                  ? const Color(0xFF122F51)
+                                  : Colors.white,
+                              width: 1.8,
+                            ),
                           ),
                         ),
                       ),
-                    ),
                   ],
                 ),
                 const SizedBox(width: 10),
@@ -1879,7 +1896,24 @@ class _TripChatScreenState extends State<TripChatScreen>
                                 ],
                               ),
                               const SizedBox(height: 1),
-                              if (isDriverTyping)
+                              if (isChatLocked)
+                                Text(
+                                  isCancelled
+                                      ? 'Trip Cancelled • Read-Only History'
+                                      : (isCompleted
+                                          ? 'Trip Completed • Read-Only History'
+                                          : 'No Driver Assigned • Chat Paused'),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark
+                                        ? Colors.grey.shade400
+                                        : Colors.grey.shade600,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                )
+                              else if (isDriverTyping)
                                 const Text(
                                   'Driver is typing...',
                                   style: TextStyle(
@@ -1916,7 +1950,8 @@ class _TripChatScreenState extends State<TripChatScreen>
               ],
             ),
             actions: [
-              if (booking.driverPhone != null &&
+              if (!isChatLocked &&
+                  booking.driverPhone != null &&
                   booking.driverPhone!.isNotEmpty)
                 IconButton(
                   icon: Container(
@@ -2051,7 +2086,9 @@ class _TripChatScreenState extends State<TripChatScreen>
                         return msA.compareTo(msB);
                       });
 
-                      if (_cachedDocs.isNotEmpty && currentUserId != null) {
+                      if (!isChatLocked &&
+                          _cachedDocs.isNotEmpty &&
+                          currentUserId != null) {
                         _markIncomingMessagesAsRead(
                             _cachedDocs, currentUserId);
                       }
@@ -2190,9 +2227,13 @@ class _TripChatScreenState extends State<TripChatScreen>
                               ),
                             Dismissible(
                               key: Key(doc.id),
-                              direction: DismissDirection.startToEnd,
+                              direction: isChatLocked
+                                  ? DismissDirection.none
+                                  : DismissDirection.startToEnd,
                               confirmDismiss: (dir) async {
-                                _setReplyMessage(doc.id, text, senderName);
+                                if (!isChatLocked) {
+                                  _setReplyMessage(doc.id, text, senderName);
+                                }
                                 return false;
                               },
                               background: Container(
@@ -2208,7 +2249,8 @@ class _TripChatScreenState extends State<TripChatScreen>
                                     data,
                                     senderName,
                                     activeChatSessionId,
-                                    isMe),
+                                    isMe,
+                                    isChatLocked: isChatLocked),
                                 child: _buildMessageBubble(doc.id, data, text,
                                     senderName, timeStr, isMe, isDark),
                               ),
@@ -2354,21 +2396,47 @@ class _TripChatScreenState extends State<TripChatScreen>
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 14),
-                    color: isDark
-                        ? const Color(0xFF0E1D34)
-                        : const Color(0xFFF1F5F9),
-                    child: Text(
-                      isCancelled
-                          ? 'Trip was cancelled. Communication channel is closed.'
-                          : 'Trip delivered & completed. Communication channel is archived.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: isDark
-                            ? Colors.grey.shade300
-                            : Colors.grey.shade800,
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? const Color(0xFF0E1D34)
+                          : const Color(0xFFF1F5F9),
+                      border: Border(
+                        top: BorderSide(
+                          color: isDark
+                              ? const Color(0xFF1E3A5F)
+                              : const Color(0xFFE2E8F0),
+                        ),
                       ),
-                      textAlign: TextAlign.center,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Iconsax.lock,
+                          size: 16,
+                          color: isDark
+                              ? Colors.grey.shade400
+                              : Colors.grey.shade700,
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            isCancelled
+                                ? 'Booking cancelled • Chat is closed because this trip is no longer active.'
+                                : (isUnassigned
+                                    ? 'No driver assigned • Chat will open once a driver accepts this booking.'
+                                    : 'Booking completed • Chat is closed (read-only archive).'),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: isDark
+                                  ? Colors.grey.shade300
+                                  : Colors.grey.shade800,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 )

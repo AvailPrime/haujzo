@@ -56,7 +56,7 @@ class AvailImageFunctions {
 
   /// Builds a centered, balanced splash logo with proper proportions matching driver app
   static Widget buildSplashLogo({
-    double? width = 280,
+    double? width = 180,
     double scale = 1.0,
   }) {
     return buildAppLogo(

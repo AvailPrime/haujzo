@@ -30,7 +30,7 @@ class AvailAppLogo extends StatelessWidget {
       );
 
   /// Factory for splash screen with centered balance, using dedicated cropped launch logo
-  factory AvailAppLogo.splash({Key? key, double? width = 280, double scale = 1.0, String? customPath}) =>
+  factory AvailAppLogo.splash({Key? key, double? width = 180, double scale = 1.0, String? customPath}) =>
       AvailAppLogo(
         key: key,
         width: width,

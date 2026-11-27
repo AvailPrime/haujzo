@@ -13,6 +13,7 @@ import '../../../../utils/constants/colors.dart';
 import '../../../../utils/constants/sizes.dart';
 import '../../../../utils/helpers/helper_functions.dart';
 import '../../../../utils/notifications/push_notification_service.dart';
+import '../../controllers/localization_controller.dart';
 import '../../controllers/user_controller.dart';
 import '../legal/about_us.dart';
 import '../legal/help_support.dart';
@@ -152,6 +153,19 @@ class SettingsScreen extends StatelessWidget {
             }
           },
         ),
+        _buildSoftDivider(dark),
+        Obx(() {
+          final locController = LocalizationController.instance;
+          return AvailProfileMenuTile(
+            icon: Iconsax.dollar_circle,
+            iconColor: const Color(0xFF0EA5E9),
+            title: 'Display Currency',
+            subtitle: locController.selectedCurrencyLabel,
+            badgeText: '${locController.selectedCurrencySymbol.value} ${locController.selectedCurrency.value}',
+            badgeColor: const Color(0xFF0EA5E9),
+            onTap: () => _showCurrencyPickerSheet(context, locController, dark),
+          );
+        }),
         _buildSoftDivider(dark),
         AvailProfileMenuTile(
           icon: Iconsax.notification,
@@ -884,4 +898,117 @@ class _SettingsSectionCard extends StatelessWidget {
       child: child,
     );
   }
+}
+
+void _showCurrencyPickerSheet(
+  BuildContext context,
+  LocalizationController locController,
+  bool dark,
+) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: dark ? const Color(0xFF132238) : Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    ),
+    builder: (sheetCtx) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 38,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade400,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Select Display Currency',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: dark ? Colors.white : const Color(0xFF0F172A),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Default currency is Ghanaian Cedi (GHS). Change anytime to preview fares in another currency.',
+              style: TextStyle(
+                fontSize: 12,
+                color: dark ? Colors.grey.shade400 : const Color(0xFF64748B),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Flexible(
+              child: Obx(
+                () => ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: locController.supportedCurrenciesList.length,
+                  separatorBuilder: (_, __) => Divider(
+                    height: 1,
+                    color: dark ? const Color(0xFF1E3A5F) : const Color(0xFFE2E8F0),
+                  ),
+                  itemBuilder: (_, index) {
+                    final item = locController.supportedCurrenciesList[index];
+                    final code = item['name']!;
+                    final sym = item['symbol']!;
+                    final label = item['label']!;
+                    final isSelected = locController.selectedCurrency.value == code;
+
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      leading: Container(
+                        width: 48,
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? AvailColors.primary
+                              : (dark ? Colors.white10 : Colors.grey.shade100),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          sym,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                            color: isSelected ? Colors.white : AvailColors.primary,
+                          ),
+                        ),
+                      ),
+                      title: Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                          color: isSelected
+                              ? AvailColors.primary
+                              : (dark ? Colors.white : const Color(0xFF0F172A)),
+                        ),
+                      ),
+                      trailing: isSelected
+                          ? const Icon(Icons.check_circle, color: AvailColors.primary, size: 20)
+                          : null,
+                      onTap: () {
+                        locController.updateCurrency(code, sym);
+                        Navigator.of(sheetCtx).pop();
+                      },
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }

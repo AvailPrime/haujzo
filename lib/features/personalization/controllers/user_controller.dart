@@ -305,10 +305,14 @@ class UserController extends GetxController {
       );
 
       if (pickedImage != null) {
-        // Upload image using your repository
+        // Upload image under user-scoped path Users/Images/Profile/{uid}
         imageUploading.value = true;
+        final uid = authRepository.authUser?.uid ?? user.value.id;
+        final storagePath = uid.isNotEmpty
+            ? 'Users/Images/Profile/$uid'
+            : 'Users/Images/Profile';
         final imageUrl = await userRepository.uploadImage(
-          'Users/Images/Profile',
+          storagePath,
           pickedImage,
         );
 

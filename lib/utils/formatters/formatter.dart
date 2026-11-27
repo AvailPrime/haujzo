@@ -9,13 +9,12 @@ class AvailFormatter {
     return DateFormat(pattern, locale).format(date);
   }
 
-  // Format Currency with a customizable locale
+  // Format Currency with a customizable locale (defaults to Ghanaian Cedi)
   static String formatCurrency(double amount,
-      {String locale = 'en_US', String? currencySymbol}) {
+      {String locale = 'en_GH', String? currencySymbol}) {
     final format = NumberFormat.currency(
       locale: locale,
-      symbol: currencySymbol ??
-          NumberFormat.simpleCurrency(locale: locale).currencySymbol,
+      symbol: currencySymbol ?? 'GH¢ ',
     );
     return format.format(amount);
   }

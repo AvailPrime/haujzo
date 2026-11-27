@@ -2,15 +2,131 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-
     function isSignedIn() {
       return request.auth != null;
     }
 
-    // Allow authenticated users (shippers, drivers, admins) full access across Firebase Storage
-    // (including booking_documents, driver_profiles, Users/Images/Profile, voice_notes, etc.)
+    function isActiveAdminUser(u) {
+      return (!('status' in u) || !(u.status is string) || !(u.status.lower() in ['blocked', 'suspended', 'disabled'])) &&
+        (
+          ('isSuperAdmin' in u && u.isSuperAdmin == true) ||
+          ('adminType' in u && u.adminType is string && u.adminType.size() > 0) ||
+          ('role' in u && u.role is string && u.role.lower() in [
+            'admin', 'administrator', 'superadmin', 'super_admin', 'finance',
+            'support', 'customer_service', 'operations',
+            'fleet_manager', 'marketing', 'staff_admin'
+          ])
+        );
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        ('admin' in request.auth.token && request.auth.token.admin == true) ||
+        ('role' in request.auth.token && request.auth.token.role is string && request.auth.token.role.lower() in [
+          'admin', 'administrator', 'superadmin', 'super_admin'
+        ]) ||
+        (
+          firestore.exists(/databases/(default)/documents/Users/$(request.auth.uid)) &&
+          isActiveAdminUser(firestore.get(/databases/(default)/documents/Users/$(request.auth.uid)).data)
+        )
+      );
+    }
+
+    function isValidImage(maxMb) {
+      return request.resource != null &&
+        request.resource.size <= maxMb * 1024 * 1024 &&
+        request.resource.contentType != null &&
+        request.resource.contentType.matches('image/.*');
+    }
+
+    // Allows standard image/* uploads AND mobile putFile() uploads where Android/iOS
+    // defaults contentType to application/octet-stream, empty string, or null (even on extension-less picker filenames).
+    function isValidImageOrLegacyUpload(maxMb) {
+      return isValidImage(maxMb) || (
+        request.resource != null &&
+        request.resource.size <= maxMb * 1024 * 1024 &&
+        (
+          request.resource.contentType == null ||
+          request.resource.contentType == '' ||
+          request.resource.contentType == 'application/octet-stream'
+        )
+      );
+    }
+
+    function isValidAudio(maxMb) {
+      return request.resource != null &&
+        request.resource.size <= maxMb * 1024 * 1024 &&
+        request.resource.contentType != null &&
+        request.resource.contentType.matches('audio/.*');
+    }
+
+    // Allows images, PDFs, Word documents (.doc/.docx), and mobile putFile() octet-stream fallback up to maxMb
+    function isValidBookingDocument(maxMb) {
+      return request.resource != null &&
+        request.resource.size <= maxMb * 1024 * 1024 &&
+        (
+          request.resource.contentType == null ||
+          request.resource.contentType == '' ||
+          request.resource.contentType.matches('image/.*') ||
+          request.resource.contentType == 'application/pdf' ||
+          request.resource.contentType == 'application/msword' ||
+          request.resource.contentType == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+          request.resource.contentType == 'application/octet-stream'
+        );
+    }
+
+    // Driver profile photos: original owner-only rule preserved; admins also permitted
+    match /driver_profiles/{userId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if (isSignedIn() && request.auth.uid == userId && (request.resource == null || isValidImage(5))) || isAdmin();
+    }
+
+    // Shipper profile photos (user-scoped path: Users/Images/Profile/{userId}/...)
+    match /Users/Images/Profile/{userId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if (isSignedIn() && request.auth.uid == userId && (request.resource == null || isValidImageOrLegacyUpload(5))) || isAdmin();
+    }
+
+    // Backward-compatible shipper profile photo uploads directly under Users/Images/Profile/{fileName}
+    // (create/update only for shippers; delete restricted to admins so users cannot delete other users' photos)
+    match /Users/Images/Profile/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if (isSignedIn() && isValidImageOrLegacyUpload(5)) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Trip chat media & voice notes (original rules preserved; admins also permitted)
+    match /chat_images/{bookingId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if (isSignedIn() && isValidImage(10)) || isAdmin();
+    }
+
+    match /voice_notes/{sessionId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if (isSignedIn() && isValidAudio(10)) || isAdmin();
+    }
+
+    // Booking waybills / attached documents (images, PDFs, DOC/DOCX up to 15 MB)
+    match /booking_documents/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow create, update: if (isSignedIn() && isValidBookingDocument(15)) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Promotional banners / public app assets managed by Admins
+    match /Banners/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /banners/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Default: full access for active Admins; deny non-admins on all unlisted paths
     match /{allPaths=**} {
-      allow read, write: if isSignedIn();
+      allow read, write: if isAdmin();
     }
   }
 }

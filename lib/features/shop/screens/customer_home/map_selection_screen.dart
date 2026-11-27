@@ -7,7 +7,6 @@ import 'package:truck_booking/features/shop/controllers/customer/customer_home_c
 import 'package:truck_booking/features/shop/screens/customer_home/widgets/animated_3d_map_pin.dart';
 import 'package:truck_booking/features/shop/screens/customer_home/place_search_screen.dart';
 import 'package:truck_booking/utils/constants/colors.dart';
-import 'package:truck_booking/utils/constants/sizes.dart';
 import 'package:truck_booking/utils/helpers/helper_functions.dart';
 import 'package:truck_booking/utils/constants/map_styles.dart';
 
@@ -16,10 +15,14 @@ class MapSelectionScreen extends StatefulWidget {
     super.key,
     required this.locationType,
     this.stopIndex,
+    this.initialLocation,
+    this.initialAddress,
   });
 
   final String locationType;
   final int? stopIndex;
+  final LatLng? initialLocation;
+  final String? initialAddress;
 
   @override
   State<MapSelectionScreen> createState() => _MapSelectionScreenState();
@@ -36,8 +39,41 @@ class _MapSelectionScreenState extends State<MapSelectionScreen> {
         widget.locationType,
         stopIndex: widget.stopIndex,
         fromDispatch: false,
+        initialLocation: widget.initialLocation,
+        initialAddress: widget.initialAddress,
       );
+      if (widget.locationType == 'pickup') {
+        Future.wait([
+          controller.getGreenCurbDotMarkerIcon(forceRefresh: true),
+          controller.getSelectedPickupSpotMarkerIcon(forceRefresh: true),
+        ]).then((_) {
+          if (mounted) setState(() {});
+        });
+      }
     });
+  }
+
+  Set<Marker> _buildSuggestedSpotMarkers(CustomerHomeController controller) {
+    if (controller.greenCurbDotMarkerIcon == null) return {};
+    return controller.suggestedPickupSpots.map((spot) {
+      final isSelected = controller.selectedSuggestedSpot.value?.id == spot.id;
+      final icon = (isSelected && controller.selectedPickupSpotMarkerIcon != null)
+          ? controller.selectedPickupSpotMarkerIcon!
+          : controller.greenCurbDotMarkerIcon!;
+      final anchor = isSelected ? const Offset(0.5, 0.8333) : const Offset(0.5, 0.5);
+
+      return Marker(
+        markerId: MarkerId(spot.id),
+        position: spot.location,
+        icon: icon,
+        anchor: anchor,
+        zIndex: isSelected ? 35 : 15,
+        onTap: () {
+          controller.selectSuggestedPickupSpot(spot);
+          if (mounted) setState(() {});
+        },
+      );
+    }).toSet();
   }
 
   @override
@@ -59,176 +95,85 @@ class _MapSelectionScreenState extends State<MapSelectionScreen> {
             Obx(
               () => GoogleMap(
                 initialCameraPosition: CameraPosition(
-                  target: controller.pinnedLocation.value ?? controller.currentPosition.value ?? const LatLng(5.6037, -0.1870),
-                  zoom: 16,
+                  target: widget.initialLocation ??
+                      controller.pinnedLocation.value ??
+                      controller.currentPosition.value ??
+                      const LatLng(5.6037, -0.1870),
+                  zoom: 17,
                 ),
                 onMapCreated: (mapCtrl) {
                   controller.mapController = mapCtrl;
                   AvailMapStyles.applyThemeStyle(mapCtrl, darkMode);
-                  if (controller.pinnedLocation.value != null) {
-                    mapCtrl.animateCamera(CameraUpdate.newLatLngZoom(controller.pinnedLocation.value!, 16));
+                  final target = widget.initialLocation ?? controller.pinnedLocation.value;
+                  if (target != null) {
+                    mapCtrl.animateCamera(CameraUpdate.newLatLngZoom(target, 17));
                   }
                 },
+                markers: widget.locationType == 'pickup' ? _buildSuggestedSpotMarkers(controller) : const {},
                 myLocationEnabled: true,
                 myLocationButtonEnabled: false,
                 zoomControlsEnabled: false,
                 mapType: controller.mapType.value,
                 trafficEnabled: controller.isTrafficEnabled.value,
-                padding: const EdgeInsets.only(bottom: 150),
+                padding: EdgeInsets.only(bottom: widget.locationType == 'pickup' ? 320 : 230),
                 onCameraMove: (position) {
                   controller.pinnedLocation.value = position.target;
                 },
                 onCameraIdle: () {
-                  if (controller.pinnedLocation.value != null) {
+                  if (controller.pinnedLocation.value != null &&
+                      (controller.pinnedAddress.value.isEmpty ||
+                          controller.pinnedAddress.value == 'Locating address...' ||
+                          controller.pinnedAddress.value == 'Where to?')) {
                     controller.updatePinnedAddress(controller.pinnedLocation.value!);
                   }
                 },
               ),
             ),
 
-            // 2. Floating Top Header
+            // 2. Clean Uber-Style Top Back Button
             Positioned(
-              top: MediaQuery.of(context).padding.top + 16,
-              left: AvailSizes.defaultSpace,
-              right: AvailSizes.defaultSpace,
-              child: ResponsiveCenter(
-                maxWidth: 560,
-                child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: AvailColors.secondary,
-                  borderRadius: BorderRadius.circular(30),
-                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 15)],
-                ),
-                child: Row(
-                  children: [
-                    GestureDetector(
-                      onTap: () {
-                        controller.exitMapSelectionMode();
-                        Get.back();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.15),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Iconsax.arrow_left, color: Colors.white, size: 18),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'SELECT ${widget.locationType.toUpperCase()} LOCATION ON MAP',
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                ),
-              ),
-            ),
-
-            // 2b. Floating Search Bar for Instant Place Lookup
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 72,
-              left: AvailSizes.defaultSpace,
-              right: AvailSizes.defaultSpace,
-              child: ResponsiveCenter(
-                maxWidth: 560,
-                child: GestureDetector(
-                onTap: () async {
-                  final searchResult = await Get.to(
-                    () => PlaceSearchScreen(
-                      initialValue: controller.pinnedAddress.value != 'Locating address...' ? controller.pinnedAddress.value : '',
-                    ),
-                    routeName: '/place-search',
-                  );
-                  if (searchResult != null && searchResult is Map) {
-                    final double? lat = (searchResult['lat'] as num?)?.toDouble();
-                    final double? lng = (searchResult['lng'] as num?)?.toDouble();
-                    final String addr = (searchResult['description'] ?? searchResult['address'] ?? searchResult['name'] ?? '').toString();
-                    if (lat != null && lng != null) {
-                      final target = LatLng(lat, lng);
-                      controller.pinnedLocation.value = target;
-                      controller.pinnedAddress.value = addr.isNotEmpty ? addr : 'GPS: ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}';
-                      controller.mapController?.animateCamera(CameraUpdate.newLatLngZoom(target, 16));
-                    }
-                  }
+              top: MediaQuery.of(context).padding.top + 14,
+              left: 18,
+              child: GestureDetector(
+                onTap: () {
+                  controller.exitMapSelectionMode();
+                  Get.back();
                 },
                 child: Container(
-                  height: 46,
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  width: 44,
+                  height: 44,
                   decoration: BoxDecoration(
                     color: darkMode ? const Color(0xFF1E293B) : Colors.white,
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(
-                      color: darkMode ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
-                      width: 1.2,
-                    ),
+                    shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: darkMode ? 0.35 : 0.08),
+                        color: Colors.black.withValues(alpha: darkMode ? 0.4 : 0.15),
                         blurRadius: 10,
                         offset: const Offset(0, 3),
                       ),
                     ],
                   ),
-                  child: Row(
-                    children: [
-                      const Icon(Iconsax.search_normal_1, color: AvailColors.primary, size: 18),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Obx(() {
-                          final currentAddr = controller.pinnedAddress.value;
-                          final hasAddr = currentAddr.isNotEmpty && currentAddr != 'Locating address...' && currentAddr != 'Where to?';
-                          return Text(
-                            hasAddr ? currentAddr : 'Search address, landmark or terminal...',
-                            style: TextStyle(
-                              color: hasAddr
-                                  ? (darkMode ? Colors.white : const Color(0xFF0F172A))
-                                  : (darkMode ? Colors.white54 : const Color(0xFF64748B)),
-                              fontSize: 12.5,
-                              fontWeight: hasAddr ? FontWeight.w700 : FontWeight.w500,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          );
-                        }),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: AvailColors.primary.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Text(
-                          'Search',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: AvailColors.primary,
-                          ),
-                        ),
-                      ),
-                    ],
+                  child: Center(
+                    child: Icon(
+                      Icons.arrow_back,
+                      color: darkMode ? Colors.white : Colors.black87,
+                      size: 20,
+                    ),
                   ),
-                ),
                 ),
               ),
             ),
 
             // 3. Floating Map Controls (Right Side)
             Positioned(
-              right: 16,
-              top: MediaQuery.of(context).padding.top + 130,
+              right: 18,
+              top: MediaQuery.of(context).padding.top + 14,
               child: Column(
                 children: [
                   FloatingActionButton.small(
                     heroTag: 'map_select_recenter',
                     onPressed: () => controller.recenterToCurrentLocation(),
-                    backgroundColor: darkMode ? const Color(0xFF0F172A) : Colors.white,
+                    backgroundColor: darkMode ? const Color(0xFF1E293B) : Colors.white,
                     foregroundColor: AvailColors.primary,
                     child: const Icon(Iconsax.gps, size: 18),
                   ),
@@ -236,7 +181,7 @@ class _MapSelectionScreenState extends State<MapSelectionScreen> {
                   FloatingActionButton.small(
                     heroTag: 'map_select_layer',
                     onPressed: () => controller.toggleMapType(),
-                    backgroundColor: darkMode ? const Color(0xFF0F172A) : Colors.white,
+                    backgroundColor: darkMode ? const Color(0xFF1E293B) : Colors.white,
                     foregroundColor: Colors.blue,
                     child: const Icon(Iconsax.layer, size: 18),
                   ),
@@ -244,10 +189,10 @@ class _MapSelectionScreenState extends State<MapSelectionScreen> {
               ),
             ),
 
-            // 4. Center Interactive Pin Widget
-            Animated3DMapPin(controller: controller),
+            // 4. Center Interactive Pin Widget (Only for destination/stops where user positions pin freely)
+            if (widget.locationType != 'pickup') Animated3DMapPin(controller: controller),
 
-            // 5. Bottom Location Confirmation Card
+            // 5. Bottom Confirmation Sheet (Exact Uber Style Matching User Screenshot)
             Positioned(
               bottom: 0,
               left: 0,
@@ -255,100 +200,411 @@ class _MapSelectionScreenState extends State<MapSelectionScreen> {
               child: ResponsiveCenter(
                 maxWidth: 560,
                 child: Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: darkMode ? const Color(0xFF0F172A) : Colors.white,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
-                  border: Border(
-                    top: BorderSide(
-                      color: darkMode ? const Color(0xFF1E3A5F) : const Color(0xFFE2E8F0),
-                    ),
-                  ),
-                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: darkMode ? 0.35 : 0.1), blurRadius: 20)],
-                ),
-                child: SafeArea(
-                  top: false,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Iconsax.location,
-                            color: widget.locationType == 'pickup' ? Colors.blue : (widget.locationType == 'destination' ? Colors.red : Colors.orange),
-                          ),
-                          const SizedBox(width: 15),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'SET ${widget.locationType.toUpperCase()} LOCATION',
-                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey),
-                                ),
-                                Obx(() => Text(
-                                  controller.pinnedAddress.value.isNotEmpty ? controller.pinnedAddress.value : 'Locating address...',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                )),
-                              ],
-                            ),
-                          ),
-                        ],
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
+                  decoration: BoxDecoration(
+                    color: darkMode ? const Color(0xFF121B28) : Colors.white,
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                    border: Border(
+                      top: BorderSide(
+                        color: darkMode ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                        width: 1.2,
                       ),
-                      const SizedBox(height: 25),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () {
-                                controller.exitMapSelectionMode();
-                                Get.back();
-                              },
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 15),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                              child: const Text('Cancel'),
-                            ),
-                          ),
-                          const SizedBox(width: 15),
-                          Expanded(
-                            child: ElevatedButton(
-                              onPressed: () {
-                                final loc = controller.pinnedLocation.value ?? controller.currentPosition.value ?? const LatLng(5.6037, -0.1870);
-                                final addr = controller.pinnedAddress.value.isNotEmpty && controller.pinnedAddress.value != 'Locating address...' && controller.pinnedAddress.value != 'Where to?'
-                                    ? controller.pinnedAddress.value
-                                    : 'GPS: ${loc.latitude.toStringAsFixed(4)}, ${loc.longitude.toStringAsFixed(4)}';
-
-                                controller.wasOpenedFromDispatchForm.value = false;
-                                controller.confirmPinnedLocation(stopIndex: widget.stopIndex);
-                                Get.back(result: {
-                                  'description': addr,
-                                  'lat': loc.latitude,
-                                  'lng': loc.longitude,
-                                });
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AvailColors.primary,
-                                padding: const EdgeInsets.symmetric(vertical: 15),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                              child: const Text('Confirm Location', style: TextStyle(color: Colors.white)),
-                            ),
-                          ),
-                        ],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: darkMode ? 0.5 : 0.12),
+                        blurRadius: 24,
+                        offset: const Offset(0, -4),
                       ),
                     ],
                   ),
-                ),
+                  child: SafeArea(
+                    top: false,
+                    child: widget.locationType == 'pickup'
+                        ? _buildUberPickupConfirmationCard(controller, darkMode)
+                        : _buildStandardConfirmationCard(controller, darkMode),
+                  ),
                 ),
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  /// Authentic Uber-Style Pickup Confirmation Card
+  Widget _buildUberPickupConfirmationCard(CustomerHomeController controller, bool darkMode) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 1. Header: "Confirm the pick-up spot" + Subtitle Place Name + Search Icon
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Confirm the pick-up spot',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      color: darkMode ? Colors.white : const Color(0xFF0F172A),
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Obx(() {
+                    final addr = controller.pinnedAddress.value;
+                    final displaySubtitle = addr.isNotEmpty && addr != 'Locating address...'
+                        ? (addr.contains('•') ? addr.split('•').last.trim() : addr)
+                        : (widget.initialAddress ?? 'Tema Bonded Terminal');
+                    return Text(
+                      displaySubtitle,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: darkMode ? Colors.grey[400] : Colors.grey[600],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    );
+                  }),
+                ],
+              ),
+            ),
+            GestureDetector(
+              onTap: () async {
+                final searchResult = await Get.to(
+                  () => PlaceSearchScreen(
+                    initialValue: controller.pinnedAddress.value != 'Locating address...'
+                        ? controller.pinnedAddress.value
+                        : '',
+                  ),
+                  routeName: '/place-search',
+                );
+                if (searchResult != null && searchResult is Map) {
+                  final double? lat = (searchResult['lat'] as num?)?.toDouble();
+                  final double? lng = (searchResult['lng'] as num?)?.toDouble();
+                  final String addr = (searchResult['description'] ??
+                          searchResult['address'] ??
+                          searchResult['name'] ??
+                          '')
+                      .toString();
+                  if (lat != null && lng != null) {
+                    final target = LatLng(lat, lng);
+                    controller.pinnedLocation.value = target;
+                    controller.pinnedAddress.value = addr;
+                    controller.generateSuggestedPickupSpots(target, addr);
+                    controller.mapController?.animateCamera(
+                      CameraUpdate.newLatLngZoom(target, 17),
+                    );
+                    if (mounted) setState(() {});
+                  }
+                }
+              },
+              child: Container(
+                padding: const EdgeInsets.all(9),
+                decoration: BoxDecoration(
+                  color: darkMode ? const Color(0xFF1E293B) : Colors.grey[100],
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Iconsax.search_normal_1,
+                  size: 19,
+                  color: darkMode ? Colors.white : Colors.black87,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+
+        // 2. Selectable Spot Cards (Matching Uber Screenshot: Spot #3, Spot #4...)
+        Obx(() {
+          final spots = controller.suggestedPickupSpots;
+          if (spots.isEmpty) return const SizedBox.shrink();
+
+          return ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 180),
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: spots.length.clamp(0, 3),
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                final spot = spots[index];
+                final isSelected = controller.selectedSuggestedSpot.value?.id == spot.id;
+
+                return InkWell(
+                  onTap: () {
+                    controller.selectSuggestedPickupSpot(spot);
+                    if (mounted) setState(() {});
+                  },
+                  borderRadius: BorderRadius.circular(14),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: darkMode
+                          ? (isSelected ? const Color(0xFF1E293B) : const Color(0xFF0F172A))
+                          : (isSelected ? Colors.white : const Color(0xFFF8FAFC)),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isSelected
+                            ? (darkMode ? Colors.white : const Color(0xFF0F172A))
+                            : (darkMode ? const Color(0xFF26354A) : const Color(0xFFE2E8F0)),
+                        width: isSelected ? 1.8 : 1.0,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                spot.title,
+                                style: TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: darkMode ? Colors.white : const Color(0xFF0F172A),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                spot.subtitle,
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w500,
+                                  color: darkMode ? Colors.grey[400] : Colors.grey[600],
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (spot.distanceMeters > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: Text(
+                              '${spot.distanceMeters.toStringAsFixed(0)}m',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: darkMode ? Colors.grey[400] : Colors.grey[500],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          );
+        }),
+        const SizedBox(height: 18),
+
+        // 3. Full-Width "Confirm pick-up" Button (Uber Screenshot Style)
+        SizedBox(
+          width: double.infinity,
+          height: 50,
+          child: ElevatedButton(
+            onPressed: () {
+              final loc = controller.pinnedLocation.value ??
+                  controller.currentPosition.value ??
+                  const LatLng(5.6037, -0.1870);
+              final addr = controller.pinnedAddress.value.isNotEmpty &&
+                      controller.pinnedAddress.value != 'Locating address...' &&
+                      controller.pinnedAddress.value != 'Where to?'
+                  ? controller.pinnedAddress.value
+                  : 'GPS: ${loc.latitude.toStringAsFixed(4)}, ${loc.longitude.toStringAsFixed(4)}';
+
+              controller.wasOpenedFromDispatchForm.value = false;
+              controller.confirmPinnedLocation(stopIndex: widget.stopIndex);
+              Get.back(result: {
+                'description': addr,
+                'lat': loc.latitude,
+                'lng': loc.longitude,
+              });
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: darkMode ? Colors.white : const Color(0xFF0F172A),
+              foregroundColor: darkMode ? Colors.black : Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              elevation: 0,
+            ),
+            child: const Text(
+              'Confirm pick-up',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Standard Confirmation Card for Destination and Intermediate Stops
+  Widget _buildStandardConfirmationCard(CustomerHomeController controller, bool darkMode) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.locationType == 'destination' ? 'Confirm delivery spot' : 'Confirm stop location',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      color: darkMode ? Colors.white : const Color(0xFF0F172A),
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Obx(() => Text(
+                    controller.pinnedAddress.value.isNotEmpty && controller.pinnedAddress.value != 'Locating address...'
+                        ? controller.pinnedAddress.value
+                        : (widget.initialAddress ?? 'Align pin on map'),
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: darkMode ? Colors.grey[400] : Colors.grey[600],
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  )),
+                ],
+              ),
+            ),
+            GestureDetector(
+              onTap: () async {
+                final searchResult = await Get.to(
+                  () => PlaceSearchScreen(
+                    initialValue: controller.pinnedAddress.value != 'Locating address...'
+                        ? controller.pinnedAddress.value
+                        : '',
+                  ),
+                  routeName: '/place-search',
+                );
+                if (searchResult != null && searchResult is Map) {
+                  final double? lat = (searchResult['lat'] as num?)?.toDouble();
+                  final double? lng = (searchResult['lng'] as num?)?.toDouble();
+                  final String addr = (searchResult['description'] ??
+                          searchResult['address'] ??
+                          searchResult['name'] ??
+                          '')
+                      .toString();
+                  if (lat != null && lng != null) {
+                    final target = LatLng(lat, lng);
+                    controller.pinnedLocation.value = target;
+                    controller.pinnedAddress.value = addr;
+                    controller.mapController?.animateCamera(
+                      CameraUpdate.newLatLngZoom(target, 17),
+                    );
+                    if (mounted) setState(() {});
+                  }
+                }
+              },
+              child: Container(
+                padding: const EdgeInsets.all(9),
+                decoration: BoxDecoration(
+                  color: darkMode ? const Color(0xFF1E293B) : Colors.grey[100],
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Iconsax.search_normal_1,
+                  size: 19,
+                  color: darkMode ? Colors.white : Colors.black87,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEF4444).withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              const Icon(Iconsax.routing_2, size: 14, color: Color(0xFFEF4444)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Move map to position exact road access or delivery gate',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: darkMode ? const Color(0xFFFCA5A5) : const Color(0xFFDC2626),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+
+        SizedBox(
+          width: double.infinity,
+          height: 50,
+          child: ElevatedButton(
+            onPressed: () {
+              final loc = controller.pinnedLocation.value ??
+                  controller.currentPosition.value ??
+                  const LatLng(5.6037, -0.1870);
+              final addr = controller.pinnedAddress.value.isNotEmpty &&
+                      controller.pinnedAddress.value != 'Locating address...' &&
+                      controller.pinnedAddress.value != 'Where to?'
+                  ? controller.pinnedAddress.value
+                  : 'GPS: ${loc.latitude.toStringAsFixed(4)}, ${loc.longitude.toStringAsFixed(4)}';
+
+              controller.wasOpenedFromDispatchForm.value = false;
+              controller.confirmPinnedLocation(stopIndex: widget.stopIndex);
+              Get.back(result: {
+                'description': addr,
+                'lat': loc.latitude,
+                'lng': loc.longitude,
+              });
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: darkMode ? Colors.white : AvailColors.primary,
+              foregroundColor: darkMode ? Colors.black : Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              elevation: 0,
+            ),
+            child: Text(
+              widget.locationType == 'destination' ? 'Confirm delivery spot' : 'Confirm stop spot',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

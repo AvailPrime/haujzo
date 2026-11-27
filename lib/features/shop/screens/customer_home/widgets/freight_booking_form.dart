@@ -14,6 +14,7 @@ import 'package:truck_booking/utils/constants/sizes.dart';
 import 'package:truck_booking/utils/helpers/helper_functions.dart';
 import 'package:truck_booking/commons/widgets/date_time_picker/custom_date_time_picker.dart';
 import 'package:truck_booking/commons/widgets/loader/loaders.dart';
+import 'package:truck_booking/features/shop/models/suggested_pickup_spot_model.dart';
 
 class JobForm extends StatelessWidget {
   const JobForm({super.key});
@@ -25,181 +26,448 @@ class JobForm extends StatelessWidget {
 
     return Form(
       key: controller.bookingFormKey,
+      child: Obx(() {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 0. High-Tech 4-Stage Stepper Header (Route -> Cargo -> Schedule -> Review)
+            _buildStepperHeader(controller, darkMode),
+            const SizedBox(height: 18),
+
+            // Dynamic Active Stage: Wraps exact content height with zero excessive bottom whitespace
+            _buildActiveStage(context, controller, darkMode),
+          ],
+        );
+      }),
+    );
+  }
+
+  Widget _buildActiveStage(BuildContext context, CustomerHomeController controller, bool darkMode) {
+    switch (controller.bookingCurrentStep.value) {
+      case 0:
+        return _buildStage0Route(context, controller, darkMode);
+      case 1:
+        return _buildStage1Cargo(context, controller, darkMode);
+      case 2:
+        return _buildStage2Schedule(context, controller, darkMode);
+      case 3:
+        return _buildStage3Review(context, controller, darkMode);
+      default:
+        return _buildStage0Route(context, controller, darkMode);
+    }
+  }
+
+  // ================= 0. MODERN 4-STAGE STEPPER HEADER =================
+  Widget _buildStepperHeader(CustomerHomeController controller, bool darkMode) {
+    final currentStep = controller.bookingCurrentStep.value;
+    final steps = [
+      {'title': 'Route', 'subtitle': 'Point A & B', 'icon': Iconsax.route_square},
+      {'title': 'Cargo', 'subtitle': 'Vehicle & specs', 'icon': Iconsax.truck_fast},
+      {'title': 'Schedule', 'subtitle': 'Time & care', 'icon': Iconsax.calendar_tick},
+      {'title': 'Review', 'subtitle': 'Contacts & fare', 'icon': Iconsax.receipt_21},
+    ];
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: darkMode ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: darkMode ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: darkMode ? 0.25 : 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. ROUTE SECTION
-          const SectionHeader(
-            title: 'LOGISTICS ROUTE',
-            subtitle: 'Define pickup, intermediate stops & destination',
-            icon: Iconsax.route_square,
-          ),
-          const SizedBox(height: AvailSizes.spaceBtwItems),
-          _buildRouteSection(context, controller, darkMode),
-          const SizedBox(height: AvailSizes.spaceBtwSections),
+          Row(
+            children: List.generate(steps.length * 2 - 1, (index) {
+              if (index.isOdd) {
+                // Connecting line
+                final stepIndex = index ~/ 2;
+                final isCompleted = currentStep > stepIndex;
+                return Expanded(
+                  child: Container(
+                    height: 2.5,
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    decoration: BoxDecoration(
+                      color: isCompleted
+                          ? const Color(0xFF10B981)
+                          : (darkMode ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                );
+              }
 
-          // 2. VEHICLE & CARGO SELECTION (WITH DYNAMIC COMPATIBILITY FILTER)
-          const SectionHeader(
-            title: 'VEHICLE & CARGO SPECIFICATIONS',
-            subtitle: 'Select vehicle type and compatible freight cargo',
-            icon: Iconsax.truck_fast,
-          ),
-          const SizedBox(height: AvailSizes.spaceBtwItems),
-          _buildTruckTypeSelector(controller, darkMode),
-          const SizedBox(height: AvailSizes.spaceBtwItems),
-          _buildCargoTypeSelector(controller, darkMode),
-          const SizedBox(height: AvailSizes.spaceBtwItems),
-          _buildTripTypeSelector(controller, darkMode),
-          const SizedBox(height: AvailSizes.spaceBtwSections),
+              // Step Node
+              final stepIndex = index ~/ 2;
+              final isCurrent = currentStep == stepIndex;
+              final isCompleted = currentStep > stepIndex;
+              final stepData = steps[stepIndex];
 
-          // 3. DISPATCH PLANNING & SCHEDULE
-          const SectionHeader(
-            title: 'DISPATCH PLANNING & VALUATION',
-            subtitle: 'Set schedule and declared cargo value',
-            icon: Iconsax.calendar_tick,
-          ),
-          const SizedBox(height: AvailSizes.spaceBtwItems),
-          _buildDispatchPlanning(context, controller, darkMode),
-          const SizedBox(height: AvailSizes.spaceBtwSections),
-
-          // 4. CARGO DETAILS & CONTAINER CONTROLS
-          const SectionHeader(
-            title: 'CARGO DIMENSIONS & CONTAINER CONTROLS',
-            subtitle: 'Specify weight, ISO container size, and tare snapping',
-            icon: Iconsax.weight,
-          ),
-          const SizedBox(height: AvailSizes.spaceBtwItems),
-          _buildCargoDetails(context, controller, darkMode),
-          const SizedBox(height: AvailSizes.spaceBtwSections),
-
-          // 5. DETAILED INVENTORY (Shown only for Loaded General, Container, or Refrigerated cargo)
-          Obx(() {
-            final cargo = controller.selectedCargoType.value;
-            final status = controller.selectedContainerStatus.value;
-            final bool isEmptyContainer = cargo == 'Container' && status == 'Empty';
-
-            if (cargo == 'Bulk / Loose Material' || cargo == 'Heavy Machinery' || isEmptyContainer) {
-              return const SizedBox();
-            }
-
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SectionHeader(
-                  title: 'ITEMIZED MANIFEST INVENTORY',
-                  subtitle: 'List specific cargo items for accurate tracking',
-                  icon: Iconsax.task_square,
+              return InkWell(
+                onTap: () => controller.jumpToBookingStep(stepIndex),
+                borderRadius: BorderRadius.circular(20),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isCurrent
+                              ? AvailColors.primary
+                              : (isCompleted
+                                  ? const Color(0xFF10B981)
+                                  : (darkMode
+                                      ? const Color(0xFF0F172A)
+                                      : const Color(0xFFF1F5F9))),
+                          border: Border.all(
+                            color: isCurrent
+                                ? AvailColors.primary
+                                : (isCompleted
+                                    ? const Color(0xFF10B981)
+                                    : (darkMode
+                                        ? const Color(0xFF475569)
+                                        : const Color(0xFFCBD5E1))),
+                            width: isCurrent ? 2 : 1.2,
+                          ),
+                          boxShadow: isCurrent
+                              ? [
+                                  BoxShadow(
+                                    color: AvailColors.primary.withValues(alpha: 0.35),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ]
+                              : null,
+                        ),
+                        child: Center(
+                          child: isCompleted
+                              ? const Icon(Icons.check, size: 16, color: Colors.white)
+                              : Icon(
+                                  stepData['icon'] as IconData,
+                                  size: 15,
+                                  color: isCurrent
+                                      ? Colors.white
+                                      : (darkMode ? Colors.grey[400] : Colors.grey[600]),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        stepData['title'] as String,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: isCurrent ? FontWeight.w900 : FontWeight.w600,
+                          color: isCurrent
+                              ? (darkMode ? Colors.white : const Color(0xFF0F172A))
+                              : (isCompleted
+                                  ? const Color(0xFF10B981)
+                                  : (darkMode ? Colors.grey[500] : Colors.grey[500])),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: AvailSizes.spaceBtwItems),
-                _buildInventorySection(controller, darkMode),
-                const SizedBox(height: AvailSizes.spaceBtwSections),
-              ],
-            );
-          }),
-
-          // 6. HANDLING & SPECIAL SERVICES
-          const SectionHeader(
-            title: 'HANDLING & SPECIAL SURCHARGES',
-            subtitle: 'Configure fragile, hazardous cargo care & ground labor assistance',
-            icon: Iconsax.shield_tick,
+              );
+            }),
           ),
-          const SizedBox(height: AvailSizes.spaceBtwItems),
-          _buildLogisticsOptions(controller, darkMode),
-          const SizedBox(height: AvailSizes.spaceBtwSections),
-
-          // 7. DOCUMENTATION
-          const SectionHeader(
-            title: 'FREIGHT DOCUMENTATION',
-            subtitle: 'Attach waybills, invoices, or cargo photos',
-            icon: Iconsax.document_text,
-          ),
-          const SizedBox(height: AvailSizes.spaceBtwItems),
-          _buildDocumentSection(context, controller, darkMode),
-          const SizedBox(height: AvailSizes.spaceBtwSections),
-
-          // 8. CONTACT PERSONS
-          const SectionHeader(
-            title: 'LOGISTICS CONTACTS',
-            subtitle: 'Provide sender & receiver details for dispatch coordination',
-            icon: Iconsax.user_square,
-          ),
-          const SizedBox(height: AvailSizes.spaceBtwItems),
-          _buildContactSection(controller, darkMode),
-          const SizedBox(height: AvailSizes.spaceBtwSections),
-
-          // 9. ITEMIZED FARE BREAKDOWN CARD
-          const SectionHeader(
-            title: 'ITEMIZED FARE BREAKDOWN',
-            subtitle: 'Real-time fare summary from Logistics Pricing Engine',
-            icon: Iconsax.receipt_21,
-          ),
-          const SizedBox(height: AvailSizes.spaceBtwItems),
-          _buildItemizedFareCard(controller, darkMode),
-          const SizedBox(height: AvailSizes.spaceBtwSections * 1.2),
-
-          // 10. REVIEW & DISPATCH BUTTON
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () {
-                final pickupResolved = controller.pickupAddressController.text.trim().isNotEmpty
-                    ? controller.pickupAddressController.text.trim()
-                    : controller.pickupName.value.trim();
-                final bool hasValidPickup = controller.pickupLocation.value != null &&
-                    pickupResolved.isNotEmpty &&
-                    pickupResolved != 'Select pickup point' &&
-                    pickupResolved != 'Current Location' &&
-                    pickupResolved != 'My Current Location';
-
-                if (!hasValidPickup) {
-                  AvailLoaders.errorSnackBar(
-                    title: 'Pickup Location Required',
-                    message: 'Please specify the freight pickup location (Point A).',
-                  );
-                  return;
-                }
-
-                final dropoffResolved = controller.dropoffAddressController.text.trim().isNotEmpty
-                    ? controller.dropoffAddressController.text.trim()
-                    : controller.destinationName.value.trim();
-                final bool hasValidDropoff = controller.destinationLocation.value != null &&
-                    dropoffResolved.isNotEmpty &&
-                    dropoffResolved != 'Where to?' &&
-                    dropoffResolved != 'Select destination / dropoff';
-
-                if (!hasValidDropoff) {
-                  AvailLoaders.errorSnackBar(
-                    title: 'Destination Required',
-                    message: 'Please specify the freight delivery destination (Point B).',
-                  );
-                  return;
-                }
-
-                if (controller.bookingFormKey.currentState!.validate()) {
-                  _showManifestReviewSheet(context, controller, darkMode);
-                }
-              },
-              icon: const Icon(Iconsax.document_text, color: Colors.white, size: 20),
-              label: const Text(
-                'REVIEW FREIGHT MANIFEST',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15,
-                  letterSpacing: 1.0,
-                ),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AvailColors.primary,
-                padding: const EdgeInsets.symmetric(vertical: 18),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                elevation: 3,
-              ),
-            ),
-          ),
-          const SizedBox(height: AvailSizes.spaceBtwSections),
         ],
       ),
+    );
+  }
+
+  // ================= STAGE 0: ROUTE & ROAD CONFIRMATION =================
+  Widget _buildStage0Route(BuildContext context, CustomerHomeController controller, bool darkMode) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(
+          title: '1. LOGISTICS ROUTE & ROAD CONFIRMATION',
+          subtitle: 'Define pickup, intermediate stops & delivery destination with live road snapping',
+          icon: Iconsax.route_square,
+        ),
+        const SizedBox(height: AvailSizes.spaceBtwItems),
+        _buildRouteSection(context, controller, darkMode),
+        const SizedBox(height: 20),
+
+        // Continue to Cargo Button
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: () => controller.nextBookingStep(),
+            icon: const Icon(Iconsax.arrow_right_3, color: Colors.white, size: 18),
+            label: const Text(
+              'CONTINUE TO CARGO & VEHICLE',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w900,
+                fontSize: 14,
+                letterSpacing: 0.8,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AvailColors.primary,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              elevation: 2,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ================= STAGE 1: CARGO & VEHICLE SPECIFICATIONS =================
+  Widget _buildStage1Cargo(BuildContext context, CustomerHomeController controller, bool darkMode) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(
+          title: '2. VEHICLE & CARGO SPECIFICATIONS',
+          subtitle: 'Select vehicle type and compatible freight cargo',
+          icon: Iconsax.truck_fast,
+        ),
+        const SizedBox(height: AvailSizes.spaceBtwItems),
+        _buildTruckTypeSelector(controller, darkMode),
+        const SizedBox(height: AvailSizes.spaceBtwItems),
+        _buildCargoTypeSelector(controller, darkMode),
+        const SizedBox(height: AvailSizes.spaceBtwItems),
+        _buildTripTypeSelector(controller, darkMode),
+        const SizedBox(height: AvailSizes.spaceBtwSections),
+
+        const SectionHeader(
+          title: 'CARGO DIMENSIONS & CONTAINER CONTROLS',
+          subtitle: 'Specify weight, ISO container size, and tare snapping',
+          icon: Iconsax.weight,
+        ),
+        const SizedBox(height: AvailSizes.spaceBtwItems),
+        _buildCargoDetails(context, controller, darkMode),
+        const SizedBox(height: AvailSizes.spaceBtwSections),
+
+        // Itemized inventory (only for loaded general, container, or refrigerated cargo)
+        Obx(() {
+          final cargo = controller.selectedCargoType.value;
+          final status = controller.selectedContainerStatus.value;
+          final bool isEmptyContainer = cargo == 'Container' && status == 'Empty';
+
+          if (cargo == 'Bulk / Loose Material' || cargo == 'Heavy Machinery' || isEmptyContainer) {
+            return const SizedBox();
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SectionHeader(
+                title: 'ITEMIZED MANIFEST INVENTORY',
+                subtitle: 'List specific cargo items for accurate tracking',
+                icon: Iconsax.task_square,
+              ),
+              const SizedBox(height: AvailSizes.spaceBtwItems),
+              _buildInventorySection(controller, darkMode),
+              const SizedBox(height: AvailSizes.spaceBtwSections),
+            ],
+          );
+        }),
+
+        // Stage 1 Navigation Buttons
+        Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: OutlinedButton.icon(
+                onPressed: () => controller.previousBookingStep(),
+                icon: const Icon(Iconsax.arrow_left_2, size: 16),
+                label: const Text('Route', style: TextStyle(fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 4,
+              child: ElevatedButton.icon(
+                onPressed: () => controller.nextBookingStep(),
+                icon: const Icon(Iconsax.arrow_right_3, size: 18, color: Colors.white),
+                label: const Text(
+                  'CONTINUE TO SCHEDULE',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                    fontSize: 13,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AvailColors.primary,
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  elevation: 2,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ================= STAGE 2: DISPATCH PLANNING, SCHEDULE & HANDLING =================
+  Widget _buildStage2Schedule(BuildContext context, CustomerHomeController controller, bool darkMode) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(
+          title: '3. DISPATCH PLANNING & VALUATION',
+          subtitle: 'Set schedule and declared cargo value',
+          icon: Iconsax.calendar_tick,
+        ),
+        const SizedBox(height: AvailSizes.spaceBtwItems),
+        _buildDispatchPlanning(context, controller, darkMode),
+        const SizedBox(height: AvailSizes.spaceBtwSections),
+
+        const SectionHeader(
+          title: 'HANDLING & SPECIAL SURCHARGES',
+          subtitle: 'Configure fragile, hazardous cargo care & ground labor assistance',
+          icon: Iconsax.shield_tick,
+        ),
+        const SizedBox(height: AvailSizes.spaceBtwItems),
+        _buildLogisticsOptions(controller, darkMode),
+        const SizedBox(height: AvailSizes.spaceBtwSections),
+
+        const SectionHeader(
+          title: 'FREIGHT DOCUMENTATION',
+          subtitle: 'Attach waybills, invoices, or cargo photos',
+          icon: Iconsax.document_text,
+        ),
+        const SizedBox(height: AvailSizes.spaceBtwItems),
+        _buildDocumentSection(context, controller, darkMode),
+        const SizedBox(height: 20),
+
+        // Stage 2 Navigation Buttons
+        Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: OutlinedButton.icon(
+                onPressed: () => controller.previousBookingStep(),
+                icon: const Icon(Iconsax.arrow_left_2, size: 16),
+                label: const Text('Cargo', style: TextStyle(fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 4,
+              child: ElevatedButton.icon(
+                onPressed: () => controller.nextBookingStep(),
+                icon: const Icon(Iconsax.arrow_right_3, size: 18, color: Colors.white),
+                label: const Text(
+                  'CONTINUE TO CONTACTS',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                    fontSize: 13,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AvailColors.primary,
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  elevation: 2,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ================= STAGE 3: LOGISTICS CONTACTS & FINAL REVIEW =================
+  Widget _buildStage3Review(BuildContext context, CustomerHomeController controller, bool darkMode) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionHeader(
+          title: '4. LOGISTICS CONTACTS',
+          subtitle: 'Provide sender & receiver details for dispatch coordination',
+          icon: Iconsax.user_square,
+        ),
+        const SizedBox(height: AvailSizes.spaceBtwItems),
+        _buildContactSection(controller, darkMode),
+        const SizedBox(height: AvailSizes.spaceBtwSections),
+
+        const SectionHeader(
+          title: 'ITEMIZED FARE BREAKDOWN',
+          subtitle: 'Real-time fare summary from Logistics Pricing Engine',
+          icon: Iconsax.receipt_21,
+        ),
+        const SizedBox(height: AvailSizes.spaceBtwItems),
+        _buildItemizedFareCard(controller, darkMode),
+        const SizedBox(height: 24),
+
+        // Stage 3 Navigation Buttons
+        Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: OutlinedButton.icon(
+                onPressed: () => controller.previousBookingStep(),
+                icon: const Icon(Iconsax.arrow_left_2, size: 16),
+                label: const Text('Schedule', style: TextStyle(fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 4,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  if (controller.validateBookingStep(3)) {
+                    _showManifestReviewSheet(context, controller, darkMode);
+                  }
+                },
+                icon: const Icon(Iconsax.document_text, color: Colors.white, size: 18),
+                label: Obx(() => Text(
+                  controller.editingBookingId.value.isNotEmpty
+                      ? 'REVIEW & UPDATE'
+                      : 'REVIEW & DISPATCH',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                    letterSpacing: 0.8,
+                  ),
+                )),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AvailColors.primary,
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  elevation: 2,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -221,10 +489,22 @@ class JobForm extends StatelessWidget {
     );
     if (result != null) {
       if (result == 'SELECT_ON_MAP') {
-        await Get.to(
-          () => const MapSelectionScreen(locationType: 'pickup'),
+        final confirmResult = await Get.to(
+          () => MapSelectionScreen(
+            locationType: 'pickup',
+            initialLocation: controller.pickupLocation.value,
+            initialAddress: controller.pickupName.value,
+          ),
           routeName: '/map-selection',
         );
+        if (confirmResult != null && confirmResult is Map) {
+          final cLat = (confirmResult['lat'] as num?)?.toDouble();
+          final cLng = (confirmResult['lng'] as num?)?.toDouble();
+          final cAddr = (confirmResult['description'] as String?) ?? '';
+          if (cLat != null && cLng != null) {
+            controller.setPickup(LatLng(cLat, cLng), cAddr.isNotEmpty ? cAddr : controller.pickupName.value);
+          }
+        }
       } else if (result is Map) {
         String addressText = (result['description'] ?? result['address'] ?? result['title'] ?? result['formatted_address'] ?? result['name'] ?? '').toString();
         final double? lat = (result['lat'] as num?)?.toDouble();
@@ -236,7 +516,25 @@ class JobForm extends StatelessWidget {
               addressText = resolved;
             }
           }
-          controller.setPickup(LatLng(lat, lng), addressText);
+          // Uber style: Open MapSelectionScreen pre-centered on this search result for pinpoint curb confirmation & access spots
+          controller.pinnedLocation.value = LatLng(lat, lng);
+          controller.pinnedAddress.value = addressText;
+          final confirmResult = await Get.to(
+            () => MapSelectionScreen(
+              locationType: 'pickup',
+              initialLocation: LatLng(lat, lng),
+              initialAddress: addressText,
+            ),
+            routeName: '/map-selection',
+          );
+          if (confirmResult != null && confirmResult is Map) {
+            final cLat = (confirmResult['lat'] as num?)?.toDouble() ?? lat;
+            final cLng = (confirmResult['lng'] as num?)?.toDouble() ?? lng;
+            final cAddr = (confirmResult['description'] as String?) ?? addressText;
+            controller.setPickup(LatLng(cLat, cLng), cAddr);
+          } else {
+            controller.setPickup(LatLng(lat, lng), addressText);
+          }
         } else if (addressText.isNotEmpty) {
           final coords = await controller.geocodeAddressToLatLng(addressText);
           controller.setPickup(coords ?? const LatLng(5.6037, -0.1870), addressText);
@@ -258,10 +556,22 @@ class JobForm extends StatelessWidget {
     );
     if (result != null) {
       if (result == 'SELECT_ON_MAP') {
-        await Get.to(
-          () => const MapSelectionScreen(locationType: 'destination'),
+        final confirmResult = await Get.to(
+          () => MapSelectionScreen(
+            locationType: 'destination',
+            initialLocation: controller.destinationLocation.value,
+            initialAddress: controller.destinationName.value,
+          ),
           routeName: '/map-selection',
         );
+        if (confirmResult != null && confirmResult is Map) {
+          final cLat = (confirmResult['lat'] as num?)?.toDouble();
+          final cLng = (confirmResult['lng'] as num?)?.toDouble();
+          final cAddr = (confirmResult['description'] as String?) ?? '';
+          if (cLat != null && cLng != null) {
+            controller.setDestination(LatLng(cLat, cLng), cAddr.isNotEmpty ? cAddr : controller.destinationName.value);
+          }
+        }
       } else if (result is Map) {
         String addressText = (result['description'] ?? result['address'] ?? result['title'] ?? result['formatted_address'] ?? result['name'] ?? '').toString();
         final double? lat = (result['lat'] as num?)?.toDouble();
@@ -273,6 +583,7 @@ class JobForm extends StatelessWidget {
               addressText = resolved;
             }
           }
+          // Direct destination assignment: cleanly store the exact searched name and coordinates
           controller.setDestination(LatLng(lat, lng), addressText);
         } else if (addressText.isNotEmpty) {
           final coords = await controller.geocodeAddressToLatLng(addressText);
@@ -499,10 +810,22 @@ class JobForm extends StatelessWidget {
                           message: 'Pin on Map',
                           child: InkWell(
                             onTap: () async {
-                              await Get.to(
-                                () => const MapSelectionScreen(locationType: 'pickup'),
+                              final confirmResult = await Get.to(
+                                () => MapSelectionScreen(
+                                  locationType: 'pickup',
+                                  initialLocation: controller.pickupLocation.value,
+                                  initialAddress: controller.pickupName.value,
+                                ),
                                 routeName: '/map-selection',
                               );
+                              if (confirmResult != null && confirmResult is Map) {
+                                final cLat = (confirmResult['lat'] as num?)?.toDouble();
+                                final cLng = (confirmResult['lng'] as num?)?.toDouble();
+                                final cAddr = (confirmResult['description'] as String?) ?? '';
+                                if (cLat != null && cLng != null) {
+                                  controller.setPickup(LatLng(cLat, cLng), cAddr.isNotEmpty ? cAddr : controller.pickupName.value);
+                                }
+                              }
                             },
                             borderRadius: BorderRadius.circular(6),
                             child: const Padding(
@@ -547,6 +870,9 @@ class JobForm extends StatelessWidget {
               ),
             ],
           ),
+
+          // Uber-Style Suggested Pickup Access Spots
+          _buildSuggestedPickupPills(controller, darkMode),
 
           // 2. TIMELINE ROUTE CONNECTOR & INTERMEDIATE STOPS (Strictly in between A and B!)
           Obx(() {
@@ -1021,10 +1347,22 @@ class JobForm extends StatelessWidget {
                           message: 'Pin on Map',
                           child: InkWell(
                             onTap: () async {
-                              await Get.to(
-                                () => const MapSelectionScreen(locationType: 'destination'),
+                              final confirmResult = await Get.to(
+                                () => MapSelectionScreen(
+                                  locationType: 'destination',
+                                  initialLocation: controller.destinationLocation.value,
+                                  initialAddress: controller.destinationName.value,
+                                ),
                                 routeName: '/map-selection',
                               );
+                              if (confirmResult != null && confirmResult is Map) {
+                                final cLat = (confirmResult['lat'] as num?)?.toDouble();
+                                final cLng = (confirmResult['lng'] as num?)?.toDouble();
+                                final cAddr = (confirmResult['description'] as String?) ?? '';
+                                if (cLat != null && cLng != null) {
+                                  controller.setDestination(LatLng(cLat, cLng), cAddr.isNotEmpty ? cAddr : controller.destinationName.value);
+                                }
+                              }
                             },
                             borderRadius: BorderRadius.circular(6),
                             child: const Padding(
@@ -1044,6 +1382,123 @@ class JobForm extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Widget _buildSuggestedPickupPills(CustomerHomeController controller, bool darkMode) {
+    return Obx(() {
+      final spots = controller.suggestedPickupSpots;
+      if (spots.isEmpty) return const SizedBox.shrink();
+
+      return Container(
+        margin: const EdgeInsets.only(top: 10, bottom: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: darkMode ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: darkMode ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                const Icon(Iconsax.location_tick, size: 13, color: Color(0xFF10B981)),
+                const SizedBox(width: 5),
+                Text(
+                  'RECOMMENDED TRUCK CURB / GATE ACCESS',
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                    color: darkMode ? const Color(0xFF10B981) : const Color(0xFF047857),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 34,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: spots.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final spot = spots[index];
+                  final isSelected = controller.selectedSuggestedSpot.value?.id == spot.id;
+
+                  return InkWell(
+                    onTap: () => controller.applySuggestedPickupSpotToForm(spot),
+                    borderRadius: BorderRadius.circular(20),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? const Color(0xFF10B981)
+                            : (darkMode ? const Color(0xFF1E293B) : Colors.white),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: isSelected
+                              ? const Color(0xFF10B981)
+                              : (darkMode ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                          width: isSelected ? 1.5 : 1,
+                        ),
+                        boxShadow: [
+                          if (isSelected)
+                            BoxShadow(
+                              color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2),
+                            ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              color: isSelected ? Colors.white : const Color(0xFF10B981),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            spot.title,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: isSelected ? FontWeight.w900 : FontWeight.w600,
+                              color: isSelected
+                                  ? Colors.white
+                                  : (darkMode ? Colors.white : const Color(0xFF0F172A)),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '• ${spot.distanceMeters.toStringAsFixed(0)}m',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
+                              color: isSelected
+                                  ? Colors.white70
+                                  : (darkMode ? Colors.grey[400] : Colors.grey[600]),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
   /// Sleek downward route timeline connector with directional indicator
@@ -2411,7 +2866,12 @@ class JobForm extends StatelessWidget {
                       controller.saveBooking();
                     },
                     icon: const Icon(Iconsax.send_1, color: Colors.white, size: 20),
-                    label: const Text('CONFIRM & DISPATCH FREIGHT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                    label: Obx(() => Text(
+                      controller.editingBookingId.value.isNotEmpty
+                          ? 'UPDATE FREIGHT MANIFEST'
+                          : 'CONFIRM & DISPATCH FREIGHT',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                    )),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AvailColors.primary,
                       padding: const EdgeInsets.symmetric(vertical: 18),

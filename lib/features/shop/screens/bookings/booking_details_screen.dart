@@ -13,6 +13,7 @@ import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../commons/widgets/loader/loaders.dart';
+import '../../../../commons/widgets/images/driver_profile_avatar.dart';
 import '../../../../data/repositories/bookings/booking_repository.dart';
 import '../../../../data/repositories/support/support_config_repository.dart';
 import '../../../../utils/constants/colors.dart';
@@ -398,11 +399,41 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
     );
     newPolylines.addAll(multiPolylines);
 
+    final activeRoute = _suggestedRoutes[safeIdx];
+    final rawPickup = _currentBooking.pickupLocation != null && _currentBooking.pickupLocation!.latitude != 0
+        ? LatLng(_currentBooking.pickupLocation!.latitude, _currentBooking.pickupLocation!.longitude)
+        : null;
+    final rawDropoff = _currentBooking.dropoffLocation != null && _currentBooking.dropoffLocation!.latitude != 0
+        ? LatLng(_currentBooking.dropoffLocation!.latitude, _currentBooking.dropoffLocation!.longitude)
+        : null;
+
+    if (rawPickup != null && rawDropoff != null && activeRoute.points.isNotEmpty) {
+      final accessConnectors = SmartRoutingEngine.instance.buildAccessConnectors(
+        origin: rawPickup,
+        destination: rawDropoff,
+        roadPoints: activeRoute.points,
+      );
+      newPolylines.addAll(accessConnectors);
+    }
+
     // 3. Midpoint Callout Badges
     final newMarkers = Map<String, Marker>.from({
       for (final m in _markers)
         if (!m.markerId.value.startsWith('route_badge')) m.markerId.value: m,
     });
+
+    if (activeRoute.points.isNotEmpty) {
+      final snappedPickup = activeRoute.points.first;
+      final snappedDropoff = activeRoute.points.last;
+      if (newMarkers.containsKey('pickup')) {
+        final old = newMarkers['pickup']!;
+        newMarkers['pickup'] = old.copyWith(positionParam: snappedPickup);
+      }
+      if (newMarkers.containsKey('dropoff')) {
+        final old = newMarkers['dropoff']!;
+        newMarkers['dropoff'] = old.copyWith(positionParam: snappedDropoff);
+      }
+    }
 
     for (int i = 0; i < _suggestedRoutes.length; i++) {
       final route = _suggestedRoutes[i];
@@ -534,6 +565,31 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
     }
   }
 
+  String _resolveDocumentContentType(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'doc':
+        return 'application/msword';
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'png':
+        return 'image/png';
+      case 'webp':
+        return 'image/webp';
+      case 'gif':
+        return 'image/gif';
+      case 'heic':
+        return 'image/heic';
+      case 'heif':
+        return 'image/heif';
+      case 'jpg':
+      case 'jpeg':
+      default:
+        return 'image/jpeg';
+    }
+  }
+
   Future<void> _saveDocumentsToFirebase() async {
     setState(() => _isSaving = true);
     try {
@@ -547,8 +603,26 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
         if (url.isNotEmpty) {
           updatedList.add({'name': fileName, 'url': url});
         } else if (path.isNotEmpty && File(path).existsSync()) {
-          final ref = FirebaseStorage.instance.ref().child('booking_documents').child(_currentBooking.id).child(fileName);
-          await ref.putFile(File(path));
+          final extension = path.contains('.')
+              ? path.split('.').last.toLowerCase()
+              : 'jpg';
+          final sanitizedName = fileName.replaceAll(RegExp(r'[^\w.]'), '_');
+          final suffix = sanitizedName.toLowerCase().endsWith('.$extension')
+              ? ''
+              : '.$extension';
+          final storageFileName =
+              '${DateTime.now().millisecondsSinceEpoch}_$sanitizedName$suffix';
+          final ref = FirebaseStorage.instance
+              .ref()
+              .child('booking_documents')
+              .child(_currentBooking.id)
+              .child(storageFileName);
+          await ref.putFile(
+            File(path),
+            SettableMetadata(
+              contentType: _resolveDocumentContentType(extension),
+            ),
+          );
           final downloadUrl = await ref.getDownloadURL();
           updatedList.add({'name': fileName, 'url': downloadUrl});
         }
@@ -610,15 +684,23 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
         foregroundColor: Colors.white,
         title: Text(name, style: const TextStyle(fontSize: 14)),
         actions: [
-          IconButton(
-            icon: const Icon(Iconsax.share),
-            onPressed: () {
-              if (isNetwork) {
-                Share.share(pathOrUrl, subject: name);
-              } else if (File(pathOrUrl).existsSync()) {
-                Share.shareXFiles([XFile(pathOrUrl)], text: name);
-              }
-            },
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: IconButton(
+              tooltip: 'Share Document',
+              icon: const Icon(Icons.share_rounded, size: 20),
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.white.withValues(alpha: 0.12),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                if (isNetwork) {
+                  Share.share(pathOrUrl, subject: name);
+                } else if (File(pathOrUrl).existsSync()) {
+                  Share.shareXFiles([XFile(pathOrUrl)], text: name);
+                }
+              },
+            ),
           ),
         ],
       ),
@@ -647,6 +729,47 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
           const SizedBox(height: 8),
           Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
         ],
+      ),
+    );
+  }
+
+  Widget _buildHeaderActionIcon({
+    required bool darkMode,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+    bool isPrimary = false,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: isPrimary
+                  ? AvailColors.primary.withValues(alpha: darkMode ? 0.2 : 0.12)
+                  : (darkMode ? Colors.grey.shade800 : Colors.grey.shade100),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isPrimary
+                    ? AvailColors.primary.withValues(alpha: 0.35)
+                    : (darkMode ? Colors.white10 : Colors.grey.shade200),
+              ),
+            ),
+            child: Icon(
+              icon,
+              size: 18,
+              color: isPrimary
+                  ? AvailColors.primary
+                  : (darkMode ? Colors.white : const Color(0xFF1E293B)),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -774,22 +897,30 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                       ],
                     ),
                   ),
-                  if (booking.status == 'pending')
-                    IconButton(
-                      icon: const Icon(Iconsax.edit, size: 18),
+                  if (booking.status == 'pending') ...[
+                    _buildHeaderActionIcon(
+                      darkMode: darkMode,
+                      icon: Icons.edit_outlined,
                       tooltip: 'Edit Manifest Details',
                       onPressed: () {
                         CustomerHomeController.instance.populateForEditing(booking);
                         Get.toNamed(AvailRoutes.jobDispatch);
                       },
                     ),
-                  IconButton(
-                    icon: const Icon(Iconsax.document_download, size: 18),
-                    tooltip: 'Waybill PDF',
+                    const SizedBox(width: 6),
+                  ],
+                  _buildHeaderActionIcon(
+                    darkMode: darkMode,
+                    icon: Icons.picture_as_pdf_outlined,
+                    tooltip: 'Export Waybill PDF',
                     onPressed: () => AvailPdfHelper.generateAndShareWaybill(booking),
                   ),
-                  IconButton(
-                    icon: const Icon(Iconsax.share, size: 18),
+                  const SizedBox(width: 6),
+                  _buildHeaderActionIcon(
+                    darkMode: darkMode,
+                    icon: Icons.share_rounded,
+                    tooltip: 'Share Manifest',
+                    isPrimary: true,
                     onPressed: () => CustomerHomeController.instance.shareManifest(booking),
                   ),
                 ],
@@ -1030,48 +1161,57 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                             ),
                           ),
                           const SizedBox(height: 3),
-                          Text(
-                            LocalizationController.instance
-                                .getFormattedPrice(booking.price),
-                            style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                              color: Colors.white,
+                          Obx(
+                            () => Text(
+                              LocalizationController.instance
+                                  .getFormattedPrice(booking.price),
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
                         ],
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 7),
-                        decoration: BoxDecoration(
-                          color: AvailColors.primary.withValues(alpha: 0.22),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: AvailColors.primary.withValues(alpha: 0.5),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: AvailColors.primary.withValues(alpha: 0.22),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AvailColors.primary.withValues(alpha: 0.5),
+                            ),
                           ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Iconsax.truck_fast,
-                              size: 15,
-                              color: AvailColors.primary,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              booking.truckType.isNotEmpty
-                                  ? booking.truckType.toUpperCase()
-                                  : booking.cargoType.toUpperCase(),
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w900,
-                                color: Colors.white,
-                                letterSpacing: 0.4,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Iconsax.truck_fast,
+                                size: 15,
+                                color: AvailColors.primary,
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  booking.truckType.isNotEmpty
+                                      ? booking.truckType.toUpperCase()
+                                      : booking.cargoType.toUpperCase(),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white,
+                                    letterSpacing: 0.4,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
@@ -1577,6 +1717,7 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
           ),
           const SizedBox(height: 14),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: List.generate(stages.length, (i) {
               final isPassed = i < currentIdx;
               final isCurrent = i == currentIdx;
@@ -1587,65 +1728,103 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                       : (darkMode
                           ? const Color(0xFF1E3A5F)
                           : Colors.grey.shade300));
+              final Color completedLine = const Color(0xFF10B981);
+              final Color inactiveLine = darkMode
+                  ? const Color(0xFF1E3A5F)
+                  : Colors.grey.shade300;
 
               return Expanded(
-                child: Row(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Container(
-                      width: 24,
-                      height: 24,
-                      decoration: BoxDecoration(
-                        color: nodeColor,
-                        shape: BoxShape.circle,
-                        boxShadow: isCurrent
-                            ? [
-                                BoxShadow(
-                                  color: AvailColors.primary
-                                      .withValues(alpha: 0.45),
-                                  blurRadius: 8,
-                                  spreadRadius: 1,
-                                ),
-                              ]
-                            : null,
-                      ),
-                      child: Icon(
-                        icons[i],
-                        size: 12,
-                        color: isPassed || isCurrent
-                            ? Colors.white
-                            : Colors.grey.shade500,
+                    SizedBox(
+                      height: 26,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              height: 3,
+                              decoration: BoxDecoration(
+                                color: i == 0
+                                    ? Colors.transparent
+                                    : (i <= currentIdx
+                                        ? completedLine
+                                        : inactiveLine),
+                                borderRadius: i == 1
+                                    ? const BorderRadius.horizontal(
+                                        left: Radius.circular(2))
+                                    : BorderRadius.zero,
+                              ),
+                            ),
+                          ),
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: nodeColor,
+                              shape: BoxShape.circle,
+                              boxShadow: isCurrent
+                                  ? [
+                                      BoxShadow(
+                                        color: AvailColors.primary
+                                            .withValues(alpha: 0.45),
+                                        blurRadius: 8,
+                                        spreadRadius: 1,
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                            child: Icon(
+                              isPassed ? Icons.check_rounded : icons[i],
+                              size: 12,
+                              color: isPassed || isCurrent
+                                  ? Colors.white
+                                  : Colors.grey.shade500,
+                            ),
+                          ),
+                          Expanded(
+                            child: Container(
+                              height: 3,
+                              decoration: BoxDecoration(
+                                color: i == stages.length - 1
+                                    ? Colors.transparent
+                                    : (i < currentIdx
+                                        ? completedLine
+                                        : inactiveLine),
+                                borderRadius: i == stages.length - 2
+                                    ? const BorderRadius.horizontal(
+                                        right: Radius.circular(2))
+                                    : BorderRadius.zero,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    if (i < stages.length - 1)
-                      Expanded(
-                        child: Container(
-                          height: 3,
-                          decoration: BoxDecoration(
-                            color: isPassed
-                                ? const Color(0xFF10B981)
-                                : (darkMode
-                                    ? const Color(0xFF1E3A5F)
-                                    : Colors.grey.shade300),
-                            borderRadius: BorderRadius.circular(2),
-                          ),
+                    const SizedBox(height: 6),
+                    Container(
+                      height: 26,
+                      alignment: Alignment.topCenter,
+                      padding: const EdgeInsets.symmetric(horizontal: 1),
+                      child: Text(
+                        labels[i],
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 8.5,
+                          height: 1.15,
+                          fontWeight:
+                              isCurrent ? FontWeight.w900 : (isPassed ? FontWeight.w700 : FontWeight.w500),
+                          color: isCurrent
+                              ? AvailColors.primary
+                              : (isPassed
+                                  ? (darkMode ? Colors.white70 : const Color(0xFF1E293B))
+                                  : Colors.grey),
                         ),
                       ),
+                    ),
                   ],
-                ),
-              );
-            }),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: List.generate(labels.length, (i) {
-              final isPassed = i <= currentIdx;
-              return Text(
-                labels[i],
-                style: TextStyle(
-                  fontSize: 8.5,
-                  fontWeight: isPassed ? FontWeight.w800 : FontWeight.w500,
-                  color: isPassed ? AvailColors.primary : Colors.grey,
                 ),
               );
             }),
@@ -2578,16 +2757,13 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
       ),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.all(2),
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: AvailColors.lineargradient,
-            ),
-            child: const CircleAvatar(
-              radius: 22,
-              backgroundImage: AssetImage(AvailImages.user),
-            ),
+          DriverProfileAvatar(
+            driverImage: job.driverImage,
+            driverId: job.driverId,
+            radius: 22,
+            showGradientBorder: true,
+            borderGradient: AvailColors.lineargradient,
+            borderWidth: 2,
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -2634,57 +2810,99 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
               ],
             ),
           ),
-          IconButton(
-            onPressed: () {
-              CustomerHomeController.instance.showJobOnMap(job);
-              Get.back();
-            },
-            icon: const Icon(Iconsax.radar5,
-                color: AvailColors.primary, size: 20),
-            style: IconButton.styleFrom(
-              backgroundColor: AvailColors.primary.withValues(alpha: 0.12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          if (job.canChatWithDriver) ...[
+            IconButton(
+              onPressed: () {
+                CustomerHomeController.instance.showJobOnMap(job);
+                Get.back();
+              },
+              icon: const Icon(Iconsax.radar5,
+                  color: AvailColors.primary, size: 20),
+              style: IconButton.styleFrom(
+                backgroundColor: AvailColors.primary.withValues(alpha: 0.12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
+              tooltip: 'Track Live on Home Map',
             ),
-            tooltip: 'Track Live on Home Map',
-          ),
-          const SizedBox(width: 8),
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              IconButton(
-                onPressed: () => Get.to(() => TripChatScreen(booking: job)),
-                icon: const Icon(Iconsax.messages_2,
-                    color: Colors.white, size: 19),
-                style: IconButton.styleFrom(
-                  backgroundColor: AvailColors.primary,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+            const SizedBox(width: 8),
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                IconButton(
+                  onPressed: () => Get.to(() => TripChatScreen(booking: job)),
+                  icon: const Icon(Iconsax.messages_2,
+                      color: Colors.white, size: 19),
+                  style: IconButton.styleFrom(
+                    backgroundColor: AvailColors.primary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  tooltip: 'In-App Trip Chat with Driver',
+                ),
+                Positioned(
+                  right: -4,
+                  top: -4,
+                  child: ShipperUnreadChatBadge(booking: job, compact: true),
+                ),
+              ],
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              onPressed: () =>
+                  CustomerHomeController.instance.callDriver(job.driverPhone),
+              icon: const Icon(Iconsax.call5, color: Colors.white, size: 19),
+              style: IconButton.styleFrom(
+                backgroundColor: const Color(0xFF10B981),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              tooltip: 'Call Driver',
+            ),
+          ] else
+            InkWell(
+              onTap: () => Get.to(() => TripChatScreen(booking: job)),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: (darkMode ? Colors.white : Colors.black)
+                      .withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: (darkMode ? Colors.white : Colors.black)
+                        .withValues(alpha: 0.12),
                   ),
                 ),
-                tooltip: 'In-App Trip Chat with Driver',
-              ),
-              Positioned(
-                right: -4,
-                top: -4,
-                child: ShipperUnreadChatBadge(booking: job, compact: true),
-              ),
-            ],
-          ),
-          const SizedBox(width: 8),
-          IconButton(
-            onPressed: () =>
-                CustomerHomeController.instance.callDriver(job.driverPhone),
-            icon: const Icon(Iconsax.call5, color: Colors.white, size: 19),
-            style: IconButton.styleFrom(
-              backgroundColor: const Color(0xFF10B981),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Iconsax.lock,
+                      size: 14,
+                      color: darkMode
+                          ? Colors.grey.shade300
+                          : Colors.grey.shade700,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      'History',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: darkMode
+                            ? Colors.grey.shade300
+                            : Colors.grey.shade700,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            tooltip: 'Call Driver',
-          ),
         ],
       ),
     );
@@ -2693,143 +2911,449 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
   void _showOperationalSupportSheet(BuildContext context, BookingModel booking) {
     final supportRepo = SupportConfigRepository.instance;
     final dark = AvailHelperFunctions.isDarkMode(context);
+    final manifestRef = booking.bookingId.isNotEmpty ? booking.bookingId : booking.id;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      showDragHandle: false,
+      backgroundColor: Colors.transparent,
       constraints: const BoxConstraints(maxWidth: 540),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
       builder: (ctx) => Obx(() {
         final cfg = supportRepo.supportConfig.value;
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[400],
-                      borderRadius: BorderRadius.circular(10),
+        return Container(
+          decoration: BoxDecoration(
+            color: dark ? const Color(0xFF0E1A2B) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            border: Border.all(
+              color: dark ? const Color(0xFF1E3A5F) : const Color(0xFFE2E8F0),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: dark ? 0.45 : 0.14),
+                blurRadius: 28,
+                offset: const Offset(0, -6),
+              ),
+            ],
+          ),
+          child: SafeArea(
+            top: false,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Drag Handle
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: dark ? Colors.white24 : Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    const Icon(Iconsax.support, color: AvailColors.primary, size: 22),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Support & Dispute Help (#${booking.bookingId})',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  const SizedBox(height: 18),
+
+                  // Executive Header Row
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(11),
+                        decoration: BoxDecoration(
+                          gradient: AvailColors.lineargradient,
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AvailColors.primary.withValues(alpha: 0.28),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Iconsax.support,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 13),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Dispatch Support & Dispute Desk',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 16.5,
+                                color: dark ? Colors.white : AvailColors.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Container(
+                                  width: 7,
+                                  height: 7,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF10B981),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    cfg.supportHours.isNotEmpty
+                                        ? cfg.supportHours
+                                        : '24/7 Dispatch & Customer Care',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: dark
+                                          ? Colors.grey.shade400
+                                          : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        visualDensity: VisualDensity.compact,
+                        style: IconButton.styleFrom(
+                          backgroundColor: dark
+                              ? Colors.white.withValues(alpha: 0.06)
+                              : const Color(0xFFF1F5F9),
+                        ),
+                        icon: Icon(
+                          Icons.close_rounded,
+                          size: 18,
+                          color: dark ? Colors.grey.shade300 : const Color(0xFF475569),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Manifest Context & Copy Reference Bar
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                    decoration: BoxDecoration(
+                      color: dark ? const Color(0xFF132238) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: dark ? const Color(0xFF1E3A5F) : const Color(0xFFE2E8F0),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Iconsax.document_text,
+                          size: 16,
+                          color: dark ? Colors.grey.shade400 : const Color(0xFF64748B),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'MANIFEST REF:',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.7,
+                            color: dark ? Colors.grey.shade400 : const Color(0xFF64748B),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '#$manifestRef',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w900,
+                              fontFamily: 'monospace',
+                              color: dark ? Colors.white : AvailColors.textPrimary,
+                            ),
+                          ),
+                        ),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () {
+                            Clipboard.setData(ClipboardData(text: manifestRef));
+                            AvailLoaders.customToast(
+                              message: 'Manifest #$manifestRef copied',
+                            );
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AvailColors.primary.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Iconsax.copy,
+                                  size: 12,
+                                  color: AvailColors.primary,
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  'COPY ID',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    color: AvailColors.primary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Dispute Policy / Guidance Banner
+                  if (cfg.disputeNotice.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(13),
+                      decoration: BoxDecoration(
+                        color: AvailColors.primary.withValues(alpha: dark ? 0.12 : 0.06),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: AvailColors.primary.withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(top: 1),
+                            child: Icon(
+                              Iconsax.shield_tick,
+                              size: 17,
+                              color: AvailColors.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              cfg.disputeNotice,
+                              style: TextStyle(
+                                fontSize: 11.8,
+                                height: 1.45,
+                                fontWeight: FontWeight.w500,
+                                color: dark ? Colors.grey.shade200 : const Color(0xFF334155),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
-                ),
-                if (cfg.disputeNotice.isNotEmpty) ...[
+
+                  const SizedBox(height: 18),
+                  Text(
+                    'DIRECT ASSISTANCE CHANNELS',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.1,
+                      color: dark ? Colors.grey.shade400 : const Color(0xFF64748B),
+                    ),
+                  ),
                   const SizedBox(height: 10),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AvailColors.primary.withValues(alpha: dark ? 0.15 : 0.08),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AvailColors.primary.withValues(alpha: 0.25)),
-                    ),
-                    child: Text(
-                      cfg.disputeNotice,
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.4,
-                        color: dark ? Colors.grey[200] : Colors.grey[800],
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      supportRepo.callEmergency();
-                    },
-                    icon: const Icon(Iconsax.warning_2, color: Colors.white, size: 18),
-                    label: Text(
-                      'Call Emergency Line (${cfg.emergencyNumber})',
-                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.shade700,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
+
+                  // 1. Call Dispatch Support
+                  _buildSupportChannelCard(
+                    dark: dark,
+                    icon: Iconsax.call_calling,
+                    accentColor: const Color(0xFF10B981),
+                    badgeText: 'VOICE DESK',
+                    title: 'Call Dispatch & Dispute Support',
+                    subtitle: '${cfg.supportPhone} • Fare, demurrage & cargo resolution',
+                    onTap: () {
                       Navigator.pop(ctx);
                       supportRepo.callSupport();
                     },
-                    icon: const Icon(Iconsax.call, color: Colors.white, size: 18),
-                    label: Text(
-                      'Call Dispatch Support (${cfg.supportPhone})',
-                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green.shade700,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () {
+                  const SizedBox(height: 10),
+
+                  // 2. Email Support & Dispute Team
+                  _buildSupportChannelCard(
+                    dark: dark,
+                    icon: Iconsax.sms_tracking,
+                    accentColor: AvailColors.primary,
+                    badgeText: 'EMAIL DESK',
+                    title: 'Submit Written Dispute / Inquiry',
+                    subtitle: '${cfg.supportEmail} • Pre-filled with Manifest #$manifestRef',
+                    onTap: () {
                       Navigator.pop(ctx);
                       supportRepo.emailSupport(
-                        subject: 'Freight Support / Dispute - Booking #${booking.bookingId}',
+                        subject: 'Freight Support / Dispute - Booking #$manifestRef',
                         body:
-                            'Booking ID: #${booking.bookingId}\nStatus: ${booking.status}\nRoute: ${booking.pickupAddress} -> ${booking.dropoffAddress}\n\nPlease describe your issue:\n',
+                            'Booking ID: #$manifestRef\nStatus: ${booking.status}\nRoute: ${booking.pickupAddress} -> ${booking.dropoffAddress}\n\nPlease describe your issue:\n',
                       );
                     },
-                    icon: const Icon(Iconsax.sms, size: 18),
-                    label: Text('Email Support (${cfg.supportEmail})'),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                Center(
-                  child: TextButton.icon(
-                    onPressed: () {
+                  const SizedBox(height: 10),
+
+                  // 3. Emergency SOS Line
+                  _buildSupportChannelCard(
+                    dark: dark,
+                    icon: Iconsax.warning_2,
+                    accentColor: const Color(0xFFEF4444),
+                    badgeText: 'SOS HOTLINE',
+                    title: 'Emergency & Roadside Response',
+                    subtitle: 'Dial ${cfg.emergencyNumber} • Immediate safety or incident escalation',
+                    isEmergency: true,
+                    onTap: () {
                       Navigator.pop(ctx);
-                      Get.toNamed(AvailRoutes.helpSupport);
+                      supportRepo.callEmergency();
                     },
-                    icon: const Icon(Iconsax.ticket, size: 16),
-                    label: const Text('Open Full Help Center & Submit Ticket'),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
       }),
+    );
+  }
+
+  Widget _buildSupportChannelCard({
+    required bool dark,
+    required IconData icon,
+    required Color accentColor,
+    required String badgeText,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+    bool isEmergency = false,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          decoration: BoxDecoration(
+            color: isEmergency
+                ? accentColor.withValues(alpha: dark ? 0.12 : 0.05)
+                : (dark ? const Color(0xFF132238) : Colors.white),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isEmergency
+                  ? accentColor.withValues(alpha: 0.4)
+                  : (dark ? const Color(0xFF1E3A5F) : const Color(0xFFE2E8F0)),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: dark ? 0.18 : 0.03),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(11),
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: dark ? 0.2 : 0.12),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Icon(icon, color: accentColor, size: 20),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: accentColor.withValues(alpha: 0.16),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            badgeText,
+                            style: TextStyle(
+                              fontSize: 8.5,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.6,
+                              color: accentColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800,
+                        color: dark ? Colors.white : AvailColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                        color: dark ? Colors.grey.shade400 : const Color(0xFF64748B),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: dark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : const Color(0xFFF1F5F9),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 13,
+                  color: isEmergency
+                      ? accentColor
+                      : (dark ? Colors.grey.shade400 : const Color(0xFF64748B)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

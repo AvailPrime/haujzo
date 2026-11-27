@@ -19,6 +19,7 @@ import 'package:truck_booking/features/personalization/screens/profile/profile.d
 
 import '../bookings/booking_details_screen.dart';
 import '../chat/trip_chat_screen.dart';
+import 'package:truck_booking/commons/widgets/images/driver_profile_avatar.dart';
 import 'package:truck_booking/commons/widgets/layouts/site_layout.dart';
 import 'widgets/animated_3d_map_pin.dart';
 import 'widgets/route_telemetry_hud.dart';
@@ -718,14 +719,44 @@ class CustomerHomeScreen extends StatelessWidget {
                           color: AvailColors.primary,
                         ),
                       ),
-                      GestureDetector(
-                        onTap: () => controller.shareManifest(job),
-                        child: const Row(
-                          children: [
-                            Icon(Iconsax.share, size: 14, color: AvailColors.primary),
-                            SizedBox(width: 4),
-                            Text('SHARE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AvailColors.primary)),
-                          ],
+                      const SizedBox(height: 4),
+                      Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => controller.shareManifest(job),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AvailColors.primary.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: AvailColors.primary.withValues(alpha: 0.25),
+                              ),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.share_rounded,
+                                  size: 13,
+                                  color: AvailColors.primary,
+                                ),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Share',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: AvailColors.primary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -808,29 +839,119 @@ class CustomerHomeScreen extends StatelessWidget {
 
   Widget _buildJourneyStepper(String status) {
     final stages = ['pending', 'confirmed', 'pickedUp', 'inTransit', 'delivered'];
+    final labels = ['Pending', 'Confirmed', 'Picked Up', 'In Transit', 'Delivered'];
     int currentStage = stages.indexOf(status);
+    if (status == 'onTheWayToPickup') currentStage = 1;
     if (currentStage == -1) currentStage = 0;
 
+    const Color completedColor = Color(0xFF10B981);
+    final Color currentColor = currentStage == 4 ? completedColor : AvailColors.primary;
+    final Color inactiveLine = Colors.grey.shade300;
+
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: List.generate(stages.length, (index) {
         final bool isCompleted = index < currentStage;
         final bool isCurrent = index == currentStage;
-        final Color color = isCompleted ? Colors.green : (isCurrent ? AvailColors.primary : Colors.grey.shade300);
 
         return Expanded(
-          child: Row(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 10, height: 10,
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              SizedBox(
+                height: 18,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        height: 2.5,
+                        color: index == 0
+                            ? Colors.transparent
+                            : (index <= currentStage
+                                ? completedColor
+                                : inactiveLine),
+                      ),
+                    ),
+                    Container(
+                      width: 14,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: isCompleted
+                            ? completedColor
+                            : (isCurrent ? currentColor : Colors.grey.shade200),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isCompleted
+                              ? completedColor
+                              : (isCurrent ? currentColor : Colors.grey.shade300),
+                          width: 1,
+                        ),
+                        boxShadow: isCurrent
+                            ? [
+                                BoxShadow(
+                                  color: currentColor.withValues(alpha: 0.35),
+                                  blurRadius: 6,
+                                  spreadRadius: 1,
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: Center(
+                        child: isCompleted || (isCurrent && currentStage == 4)
+                            ? const Icon(
+                                Icons.check_rounded,
+                                size: 9,
+                                color: Colors.white,
+                              )
+                            : (isCurrent
+                                ? Container(
+                                    width: 4,
+                                    height: 4,
+                                    decoration: const BoxDecoration(
+                                      color: Colors.white,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  )
+                                : null),
+                      ),
+                    ),
+                    Expanded(
+                      child: Container(
+                        height: 2.5,
+                        color: index == stages.length - 1
+                            ? Colors.transparent
+                            : (index < currentStage
+                                ? completedColor
+                                : inactiveLine),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              if (index != stages.length - 1)
-                Expanded(
-                  child: Container(
-                    height: 2,
-                    color: isCompleted ? Colors.green : Colors.grey.shade300,
+              const SizedBox(height: 4),
+              Container(
+                height: 24,
+                alignment: Alignment.topCenter,
+                padding: const EdgeInsets.symmetric(horizontal: 1),
+                child: Text(
+                  labels[index],
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 8,
+                    height: 1.1,
+                    fontWeight: isCurrent
+                        ? FontWeight.w900
+                        : (isCompleted ? FontWeight.w700 : FontWeight.w500),
+                    color: isCurrent
+                        ? currentColor
+                        : (isCompleted
+                            ? completedColor
+                            : Colors.grey.shade500),
                   ),
                 ),
+              ),
             ],
           ),
         );
@@ -842,13 +963,10 @@ class CustomerHomeScreen extends StatelessWidget {
     final controller = CustomerHomeController.instance;
     return Row(
       children: [
-        Container(
-          width: 45, height: 45,
-          decoration: BoxDecoration(
-            color: AvailColors.primary.withValues(alpha: 0.1),
-            shape: BoxShape.circle,
-            image: const DecorationImage(image: AssetImage(AvailImages.user), fit: BoxFit.cover),
-          ),
+        DriverProfileAvatar(
+          driverImage: job.driverImage,
+          driverId: job.driverId,
+          radius: 22.5,
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -860,32 +978,34 @@ class CustomerHomeScreen extends StatelessWidget {
             ],
           ),
         ),
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            IconButton(
-              onPressed: () => Get.to(() => TripChatScreen(booking: job)),
-              icon: const Icon(Iconsax.messages_2,
-                  color: AvailColors.primary, size: 20),
-              style: IconButton.styleFrom(
-                backgroundColor: AvailColors.primary.withValues(alpha: 0.12),
+        if (job.canChatWithDriver) ...[
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              IconButton(
+                onPressed: () => Get.to(() => TripChatScreen(booking: job)),
+                icon: const Icon(Iconsax.messages_2,
+                    color: AvailColors.primary, size: 20),
+                style: IconButton.styleFrom(
+                  backgroundColor: AvailColors.primary.withValues(alpha: 0.12),
+                ),
+                tooltip: 'Chat with Driver',
               ),
-              tooltip: 'Chat with Driver',
-            ),
-            Positioned(
-              right: -2,
-              top: -2,
-              child: ShipperUnreadChatBadge(booking: job, compact: true),
-            ),
-          ],
-        ),
-        const SizedBox(width: 6),
-        IconButton(
-          onPressed: () => controller.callDriver(job.driverPhone),
-          icon: const Icon(Iconsax.call5, color: Colors.green, size: 20),
-          style: IconButton.styleFrom(backgroundColor: Colors.green.withValues(alpha: 0.1)),
-        ),
-        const SizedBox(width: 8),
+              Positioned(
+                right: -2,
+                top: -2,
+                child: ShipperUnreadChatBadge(booking: job, compact: true),
+              ),
+            ],
+          ),
+          const SizedBox(width: 6),
+          IconButton(
+            onPressed: () => controller.callDriver(job.driverPhone),
+            icon: const Icon(Iconsax.call5, color: Colors.green, size: 20),
+            style: IconButton.styleFrom(backgroundColor: Colors.green.withValues(alpha: 0.1)),
+          ),
+          const SizedBox(width: 8),
+        ],
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(5)),

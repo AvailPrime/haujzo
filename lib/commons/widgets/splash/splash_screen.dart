@@ -29,7 +29,7 @@ class AvailSplashScreen extends StatelessWidget {
     this.backgroundColor,
     this.showIndicator = true,
     this.indicatorColor,
-    this.logoSize = 280.0,
+    this.logoSize = 180.0,
     this.footerText,
   });
 

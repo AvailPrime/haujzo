@@ -31,13 +31,12 @@ import 'package:truck_booking/features/personalization/controllers/localization_
 import 'package:truck_booking/features/shop/models/booking_model.dart';
 import 'package:truck_booking/features/shop/models/pricing_config_model.dart';
 import 'package:truck_booking/features/shop/utils/freight_pricing_engine.dart';
-import 'package:truck_booking/features/shop/screens/customer_home/job_dispatch_screen.dart';
 import 'package:truck_booking/features/personalization/controllers/user_controller.dart';
-import 'package:truck_booking/features/personalization/screens/verification/didit_verification_screen.dart';
 import 'package:truck_booking/data/services/routing/smart_routing_engine.dart';
 import 'package:truck_booking/utils/constants/map_styles.dart';
 import 'package:truck_booking/data/repositories/address/address_repository.dart';
 import 'package:truck_booking/utils/notifications/trip_payment_alert_service.dart';
+import 'package:truck_booking/features/shop/models/suggested_pickup_spot_model.dart';
 
 class CustomerHomeController extends GetxController {
   static CustomerHomeController get instance => Get.find();
@@ -367,6 +366,17 @@ class CustomerHomeController extends GetxController {
   // Editing existing booking
   final RxString editingBookingId = ''.obs;
   final RxString editingCustomBookingId = ''.obs;
+
+  // Multi-Stage Booking Wizard State (0: Route, 1: Cargo, 2: Schedule, 3: Review)
+  final RxInt bookingCurrentStep = 0.obs;
+  final PageController bookingPageController = PageController();
+  final ScrollController dispatchScrollController = ScrollController();
+
+  // Uber-Style Suggested Pickup Spots
+  final RxList<SuggestedPickupSpotModel> suggestedPickupSpots = <SuggestedPickupSpotModel>[].obs;
+  final Rxn<SuggestedPickupSpotModel> selectedSuggestedSpot = Rxn<SuggestedPickupSpotModel>();
+  BitmapDescriptor? greenCurbDotMarkerIcon;
+  BitmapDescriptor? selectedPickupSpotMarkerIcon;
 
   // Analytics for Cargo Owner
   final RxInt activeJobsCount = 0.obs;
@@ -1357,13 +1367,33 @@ class CustomerHomeController extends GetxController {
 
   final RxBool wasOpenedFromDispatchForm = false.obs;
 
-  void enterMapSelectionMode(String type, {int? stopIndex, bool fromDispatch = false}) {
+  void enterMapSelectionMode(String type, {
+    int? stopIndex, 
+    bool fromDispatch = false,
+    LatLng? initialLocation,
+    String? initialAddress,
+  }) {
     isSelectingOnMap.value = true;
     selectingLocationType.value = type;
     wasOpenedFromDispatchForm.value = fromDispatch;
     
     // Initial pin position - always guaranteed non-null
     if (type == 'pickup') {
+      greenCurbDotMarkerIcon = null;
+      selectedPickupSpotMarkerIcon = null;
+    }
+    if (initialLocation != null) {
+      pinnedLocation.value = initialLocation;
+      pinnedAddress.value = (initialAddress != null &&
+              initialAddress.isNotEmpty &&
+              initialAddress != 'Where to?' &&
+              initialAddress != 'Select destination / dropoff')
+          ? initialAddress
+          : '';
+      if (type == 'pickup') {
+        generateSuggestedPickupSpots(initialLocation, pinnedAddress.value);
+      }
+    } else if (type == 'pickup') {
       pinnedLocation.value = pickupLocation.value ?? currentPosition.value ?? const LatLng(5.6037, -0.1870);
       pinnedAddress.value = (pickupName.value.isNotEmpty &&
               pickupName.value != 'Select pickup point' &&
@@ -1371,6 +1401,7 @@ class CustomerHomeController extends GetxController {
               pickupName.value != 'My Current Location')
           ? pickupName.value
           : '';
+      generateSuggestedPickupSpots(pinnedLocation.value!, pinnedAddress.value);
     } else if (type == 'destination') {
       pinnedLocation.value = destinationLocation.value ?? currentPosition.value ?? const LatLng(5.6037, -0.1870);
       pinnedAddress.value = (destinationName.value.isNotEmpty && destinationName.value != 'Where to?' && destinationName.value != 'Select destination / dropoff') ? destinationName.value : '';
@@ -1503,6 +1534,278 @@ class CustomerHomeController extends GetxController {
     } catch (e) {
       pinnedAddress.value = '${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
     }
+
+    if (selectingLocationType.value == 'pickup') {
+      generateSuggestedPickupSpots(position, pinnedAddress.value);
+    }
+  }
+
+  String _extractShortPlaceName(String address) {
+    if (address.isEmpty || address.contains('GPS:') || address.contains('Locating')) {
+      return 'Terminal';
+    }
+    final clean = address.split('•').last.trim();
+    final parts = clean.split(',');
+    final firstPart = parts.first.trim();
+    if (firstPart.isNotEmpty && firstPart.length <= 36) {
+      return firstPart;
+    }
+    return parts.length > 1 && parts[1].trim().isNotEmpty ? parts[1].trim() : 'Pickup Spot';
+  }
+
+  /// Synthesizes Uber-style designated pickup hotspots & street curb access points around a location
+  /// Ensures all spots are tightly clustered within range (~10m - 25m) matching professional Uber standards
+  Future<void> generateSuggestedPickupSpots(LatLng center, [String address = '']) async {
+    final List<SuggestedPickupSpotModel> spots = [];
+    final String shortName = _extractShortPlaceName(address);
+
+    // Spot 1: Spot #1 (Pinpoint / Primary Gate access)
+    spots.add(
+      SuggestedPickupSpotModel(
+        id: 'curb_spot_1',
+        title: 'Near $shortName - Spot #1',
+        subtitle: 'Near $shortName',
+        location: center,
+        badge: 'RECOMMENDED',
+        distanceMeters: 0,
+        icon: Iconsax.direct_right,
+      ),
+    );
+
+    // Spot 2: Spot #2 (Tightly offset ~12 meters)
+    spots.add(
+      SuggestedPickupSpotModel(
+        id: 'curb_spot_2',
+        title: 'Near $shortName - Spot #2',
+        subtitle: 'Near $shortName',
+        location: LatLng(center.latitude + 0.00010, center.longitude + 0.00008),
+        badge: 'TRUCK GATE',
+        distanceMeters: 13,
+        icon: Iconsax.truck_fast,
+      ),
+    );
+
+    // Spot 3: Spot #3 (Tightly offset ~18 meters)
+    spots.add(
+      SuggestedPickupSpotModel(
+        id: 'curb_spot_3',
+        title: 'Near $shortName - Spot #3',
+        subtitle: 'Near $shortName',
+        location: LatLng(center.latitude - 0.00012, center.longitude - 0.00010),
+        badge: 'CARGO DOCK',
+        distanceMeters: 18,
+        icon: Iconsax.box,
+      ),
+    );
+
+    // Spot 4: Spot #4 (Tightly offset ~22 meters)
+    spots.add(
+      SuggestedPickupSpotModel(
+        id: 'curb_spot_4',
+        title: 'Near $shortName - Spot #4',
+        subtitle: 'Near $shortName',
+        location: LatLng(center.latitude + 0.00006, center.longitude - 0.00015),
+        badge: 'CURB SIDE',
+        distanceMeters: 22,
+        icon: Iconsax.routing,
+      ),
+    );
+
+    suggestedPickupSpots.assignAll(spots);
+    selectedSuggestedSpot.value = spots.first;
+  }
+
+  /// User taps a suggested pickup spot in MapSelectionScreen
+  void selectSuggestedPickupSpot(SuggestedPickupSpotModel spot) {
+    HapticFeedback.selectionClick();
+    selectedSuggestedSpot.value = spot;
+    pinnedLocation.value = spot.location;
+    pinnedAddress.value = spot.title;
+    if (mapController != null) {
+      mapController!.animateCamera(CameraUpdate.newLatLng(spot.location));
+    }
+  }
+
+  /// User taps a suggested pickup spot chip in Freight Booking Form (Stage 1)
+  void applySuggestedPickupSpotToForm(SuggestedPickupSpotModel spot) {
+    HapticFeedback.selectionClick();
+    selectedSuggestedSpot.value = spot;
+    setPickup(spot.location, spot.title);
+  }
+
+  /// Generates the high-visibility Uber-style green dot marker icon for unselected spots
+  Future<BitmapDescriptor> getGreenCurbDotMarkerIcon({bool forceRefresh = false}) async {
+    if (greenCurbDotMarkerIcon != null && !forceRefresh) return greenCurbDotMarkerIcon!;
+
+    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(pictureRecorder);
+    const double size = 64.0;
+    final Offset center = const Offset(size / 2, size / 2);
+
+    // 1. Soft Pulse Halo (Shadow / Ambient ring)
+    final Paint shadow = Paint()
+      ..color = const Color(0xFF10B981).withValues(alpha: 0.35)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+    canvas.drawCircle(center, 24.0, shadow);
+
+    // 2. Solid White Disc
+    final Paint whiteRing = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(center, 16.0, whiteRing);
+
+    // 3. Subtle Dark Ring Border
+    final Paint ringBorder = Paint()
+      ..color = const Color(0xFF1E293B)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+    canvas.drawCircle(center, 16.0, ringBorder);
+
+    // 4. Inner Dot (Emerald Green)
+    final Paint innerDot = Paint()
+      ..color = const Color(0xFF10B981)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(center, 9.5, innerDot);
+
+    // 5. Center White Accent Pip
+    final Paint centerPip = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(center, 3.0, centerPip);
+
+    final ui.Image image = await pictureRecorder.endRecording().toImage(size.toInt(), size.toInt());
+    final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData != null) {
+      greenCurbDotMarkerIcon = BitmapDescriptor.bytes(byteData.buffer.asUint8List(), imagePixelRatio: 2.0);
+      return greenCurbDotMarkerIcon!;
+    }
+    return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
+  }
+
+  /// Generates the floating "Pick-up here" callout badge for the active selected spot (Uber style)
+  Future<BitmapDescriptor> getSelectedPickupSpotMarkerIcon({bool forceRefresh = false}) async {
+    if (selectedPickupSpotMarkerIcon != null && !forceRefresh) return selectedPickupSpotMarkerIcon!;
+
+    final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(pictureRecorder);
+    const double width = 320.0;
+    const double height = 180.0;
+    const double centerX = width / 2; // 160.0
+
+    // 1. Draw "Pick-up here" Stadium Pill at Top
+    const double pillWidth = 220.0;
+    const double pillHeight = 60.0;
+    final RRect pillRRect = RRect.fromRectAndRadius(
+      Rect.fromCenter(center: const Offset(centerX, 36.0), width: pillWidth, height: pillHeight),
+      const Radius.circular(30.0),
+    );
+
+    // Pill Drop Shadow
+    final Paint shadowPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.35)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+    canvas.drawRRect(pillRRect.shift(const Offset(0, 3)), shadowPaint);
+
+    // Pill Solid White Background
+    final Paint pillBg = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawRRect(pillRRect, pillBg);
+
+    // Pill Subtle Light-Grey Border
+    final Paint pillBorder = Paint()
+      ..color = const Color(0xFFE2E8F0)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+    canvas.drawRRect(pillRRect, pillBorder);
+
+    // Text: "Pick-up here"
+    final TextPainter textPainter = TextPainter(
+      text: const TextSpan(
+        text: 'Pick-up here',
+        style: TextStyle(
+          color: Color(0xFF0F172A),
+          fontSize: 27.0,
+          fontWeight: FontWeight.w900,
+          letterSpacing: -0.3,
+        ),
+      ),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+    textPainter.paint(
+      canvas,
+      Offset(centerX - textPainter.width / 2, 36.0 - textPainter.height / 2),
+    );
+
+    // 2. Vertical Pin Stem
+    // Stem outline / shadow
+    final Paint stemOutline = Paint()
+      ..color = Colors.black38
+      ..strokeWidth = 5.0
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(const Offset(centerX, 66.0), const Offset(centerX, 115.0), stemOutline);
+
+    // Stem white core
+    final Paint stemPaint = Paint()
+      ..color = Colors.white
+      ..strokeWidth = 3.5
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(const Offset(centerX, 66.0), const Offset(centerX, 115.0), stemPaint);
+
+    // Stem loop ring (like needle eye in Uber style)
+    final Paint loopOutline = Paint()
+      ..color = Colors.black38
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4.5;
+    canvas.drawCircle(const Offset(centerX, 126.0), 13.0, loopOutline);
+
+    final Paint loopPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0;
+    canvas.drawCircle(const Offset(centerX, 126.0), 13.0, loopPaint);
+
+    // 3. Ground Location Target Dot (Center at 160.0, 150.0)
+    final Offset dotCenter = const Offset(centerX, 150.0);
+
+    // Soft Emerald Halo
+    final Paint halo = Paint()
+      ..color = const Color(0xFF10B981).withValues(alpha: 0.35)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(dotCenter, 22.0, halo);
+
+    // Solid White Disc
+    final Paint whiteRing = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(dotCenter, 15.0, whiteRing);
+
+    // Dark Crisp Outline
+    final Paint ringOutline = Paint()
+      ..color = const Color(0xFF0F172A)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2;
+    canvas.drawCircle(dotCenter, 15.0, ringOutline);
+
+    // Emerald Green Core
+    final Paint innerDot = Paint()
+      ..color = const Color(0xFF10B981)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(dotCenter, 9.5, innerDot);
+
+    // White Center Pip
+    final Paint pip = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(dotCenter, 3.5, pip);
+
+    final ui.Image image = await pictureRecorder.endRecording().toImage(width.toInt(), height.toInt());
+    final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData != null) {
+      selectedPickupSpotMarkerIcon = BitmapDescriptor.bytes(byteData.buffer.asUint8List(), imagePixelRatio: 2.0);
+      return selectedPickupSpotMarkerIcon!;
+    }
+    return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
   }
 
   final RxBool isTrafficEnabled = false.obs;
@@ -1955,26 +2258,35 @@ class CustomerHomeController extends GetxController {
   }
 
   void shareManifest(BookingModel job) {
-    final String bookingId = job.bookingId;
-    String displayId = "FT-";
-    if (bookingId.length >= 8) {
-      displayId += "${bookingId.substring(0, 4)}-${bookingId.substring(4, 8)}".toUpperCase();
-    } else {
-      displayId += bookingId.toUpperCase();
+    final String rawId = job.bookingId.isNotEmpty ? job.bookingId.trim() : job.id.trim();
+    String displayId = rawId.toUpperCase();
+    if (!displayId.startsWith('FT')) {
+      displayId = 'FT-$displayId';
     }
 
+    final truckSpec = job.truckType.isNotEmpty ? ' • ${job.truckType}' : '';
+    final driverLine = (job.driverName != null && job.driverName!.trim().isNotEmpty)
+        ? 'Assigned Driver: ${job.driverName}${job.driverPhone != null && job.driverPhone!.isNotEmpty ? ' (${job.driverPhone})' : ''}'
+        : 'Dispatch Status: Awaiting Driver Assignment';
+
     final message = '''
-📜 FREIGHT MANIFEST: $displayId
-🚛 Status: ${job.status.toUpperCase()}
-📦 Cargo: ${job.cargoType} (${job.weight} Tons)
-📍 Pickup: ${job.pickupAddress}
-🏁 Destination: ${job.dropoffAddress}
-💰 Total Rate: GHS ${job.price.toStringAsFixed(2)}
-${job.driverName != null ? '👨‍✈️ Driver: ${job.driverName} (${job.driverPhone})' : '⌛ Waiting for driver assignment...'}
-Powered by Truck Booking App
+HAUJZO FREIGHT MANIFEST • #$displayId
+━━━━━━━━━━━━━━━━━━━━━━
+• Status: ${job.status.toUpperCase()}
+• Cargo: ${job.cargoType} (${job.weight} Tons$truckSpec)
+• Pickup: ${job.pickupAddress}
+• Dropoff: ${job.dropoffAddress}
+• Distance: ${job.distance.toStringAsFixed(1)} km
+• Total Freight Rate: ${LocalizationController.instance.getFormattedPrice(job.price)}
+• $driverLine
+━━━━━━━━━━━━━━━━━━━━━━
+Haujzo Logistics & Freight Dispatch
 ''';
-    
-    Share.share(message);
+
+    Share.share(
+      message.trim(),
+      subject: 'Haujzo Freight Manifest #$displayId',
+    );
   }
 
   void swapPickupAndDestination() {
@@ -2000,6 +2312,7 @@ Powered by Truck Booking App
     pickupLocation.value = pos;
     pickupName.value = name;
     pickupAddressController.text = name;
+    generateSuggestedPickupSpots(pos, name);
     drawRoute();
 
     if (name.toLowerCase().contains('current location') || name.trim().isEmpty) {
@@ -2247,6 +2560,36 @@ Powered by Truck Booking App
           coreWidth: 3.8,
         ),
       );
+
+      // Access Connectors for compound/dock access points
+      final accessConnectors = SmartRoutingEngine.instance.buildAccessConnectors(
+        origin: pickup,
+        destination: dropoff,
+        roadPoints: freightPoints,
+      );
+      newPolylines.addAll(accessConnectors);
+
+      // Anchor markers flush at the exact road endpoints of the polyline
+      final LatLng roadPickup = freightPoints.first;
+      final LatLng roadDropoff = freightPoints.last;
+
+      newMarkers['pickup'] = Marker(
+        markerId: const MarkerId('pickup'),
+        position: roadPickup,
+        infoWindow: InfoWindow(title: 'Pickup: ${booking.pickupAddress}'),
+        icon: customPickupMarkerIcon ?? pickupIcon,
+        anchor: pinAnchor,
+        zIndex: 30,
+      );
+
+      newMarkers['destination'] = Marker(
+        markerId: const MarkerId('destination'),
+        position: roadDropoff,
+        infoWindow: InfoWindow(title: 'Dropoff: ${booking.dropoffAddress}'),
+        icon: customDropoffMarkerIcon ?? destinationIcon,
+        anchor: pinAnchor,
+        zIndex: 30,
+      );
     }
 
     markers.assignAll(newMarkers.values.toSet());
@@ -2343,13 +2686,59 @@ Powered by Truck Booking App
 
     calculatePrice(routeData.distanceKm);
 
-    // 3. Render Triple-Layered Glowing Neon Polylines with Suggested Alternatives
+    // 3. Anchor Pickup & Destination Markers flush on the real road route endpoints
+    final LatLng roadStart = routeData.points.isNotEmpty ? routeData.points.first : start;
+    final LatLng roadEnd = routeData.points.isNotEmpty ? routeData.points.last : end;
+
+    final Set<Marker> updatedMarkers = {
+      Marker(
+        markerId: const MarkerId('pickup'),
+        position: roadStart,
+        infoWindow: InfoWindow(
+          title: 'Pickup (Road Access)',
+          snippet: pickupAddressController.text.isNotEmpty ? pickupAddressController.text : pickupName.value,
+        ),
+        icon: customPickupMarkerIcon ?? pickupIcon,
+        anchor: pinAnchor,
+        zIndex: 30,
+      ),
+      Marker(
+        markerId: const MarkerId('destination'),
+        position: roadEnd,
+        infoWindow: InfoWindow(
+          title: 'Dropoff (Road Access)',
+          snippet: dropoffAddressController.text.isNotEmpty ? dropoffAddressController.text : destinationName.value,
+        ),
+        icon: customDropoffMarkerIcon ?? destinationIcon,
+        anchor: pinAnchor,
+        zIndex: 30,
+      ),
+    };
+
+    // Add intermediate stop markers
+    for (int i = 0; i < additionalStops.length; i++) {
+      final stopIcon = await buildStopMarkerIcon(i + 1);
+      final sLat = (additionalStops[i]['lat'] as num).toDouble();
+      final sLng = (additionalStops[i]['lng'] as num).toDouble();
+      updatedMarkers.add(Marker(
+        markerId: MarkerId('stop_$i'),
+        position: LatLng(sLat, sLng),
+        infoWindow: InfoWindow(title: 'Stop ${i + 1}: ${additionalStops[i]['address']}'),
+        icon: stopIcon,
+        anchor: pinAnchor,
+        zIndex: 25,
+      ));
+    }
+
+    markers.assignAll(updatedMarkers);
+
+    // 4. Render Triple-Layered Glowing Neon Polylines with Suggested Alternatives
     _renderRoutePolylines();
 
-    // 4. Render Interactive Midpoint Route Callout Badges on the Map
+    // 5. Render Interactive Midpoint Route Callout Badges on the Map
     await _updateRouteBadgeMarkers();
 
-    // 5. Update Map Camera to fit bounds comfortably
+    // 6. Update Map Camera to fit bounds comfortably
     if (mapController != null && routeData.bounds != null) {
       _safeAnimateCamera(mapController, CameraUpdate.newLatLngBounds(routeData.bounds!, 85));
     }
@@ -2357,7 +2746,7 @@ Powered by Truck Booking App
     _updateHomeMapTruckMarkers();
   }
 
-  /// Renders polylines for active route + clickable background alternative routes
+  /// Renders polylines for active route + clickable background alternative routes + access connectors
   void _renderRoutePolylines() {
     if (suggestedRoutes.isEmpty) {
       polylines.clear();
@@ -2370,7 +2759,17 @@ Powered by Truck Booking App
       onSelectRoute: (idx) => selectSuggestedRoute(idx),
       coreWidth: 3.8,
     );
-    polylines.assignAll({...approachPolylines, ...multiPolylines});
+
+    // Build access connectors for any off-road building/dock locations
+    final safeIdx = selectedRouteIndex.value.clamp(0, suggestedRoutes.length - 1);
+    final activeRoute = suggestedRoutes[safeIdx];
+    final accessConnectors = SmartRoutingEngine.instance.buildAccessConnectors(
+      origin: pickupLocation.value ?? activeRoute.origin,
+      destination: destinationLocation.value ?? activeRoute.destination,
+      roadPoints: activeRoute.points,
+    );
+
+    polylines.assignAll({...approachPolylines, ...multiPolylines, ...accessConnectors});
   }
 
   /// Switch active route between suggested alternatives with dynamic price & polyline update
@@ -2386,6 +2785,41 @@ Powered by Truck Booking App
 
     // Dynamically recalculate fare price based on selected route distance
     calculatePrice(selectedRoute.distanceKm);
+
+    // Re-align markers flush with the selected route endpoints
+    if (selectedRoute.points.isNotEmpty) {
+      final roadStart = selectedRoute.points.first;
+      final roadEnd = selectedRoute.points.last;
+      final updatedMarkers = Set<Marker>.from(markers);
+      updatedMarkers.removeWhere((m) => m.markerId.value == 'pickup' || m.markerId.value == 'destination');
+      updatedMarkers.add(
+        Marker(
+          markerId: const MarkerId('pickup'),
+          position: roadStart,
+          infoWindow: InfoWindow(
+            title: 'Pickup (Road Access)',
+            snippet: pickupAddressController.text.isNotEmpty ? pickupAddressController.text : pickupName.value,
+          ),
+          icon: customPickupMarkerIcon ?? pickupIcon,
+          anchor: pinAnchor,
+          zIndex: 30,
+        ),
+      );
+      updatedMarkers.add(
+        Marker(
+          markerId: const MarkerId('destination'),
+          position: roadEnd,
+          infoWindow: InfoWindow(
+            title: 'Dropoff (Road Access)',
+            snippet: dropoffAddressController.text.isNotEmpty ? dropoffAddressController.text : destinationName.value,
+          ),
+          icon: customDropoffMarkerIcon ?? destinationIcon,
+          anchor: pinAnchor,
+          zIndex: 30,
+        ),
+      );
+      markers.assignAll(updatedMarkers);
+    }
 
     // Re-render polylines with the selected route brought forward in vivid traffic colors
     _renderRoutePolylines();
@@ -2648,6 +3082,31 @@ Powered by Truck Booking App
     pickedDocuments[index]['name'] = name;
   }
 
+  String _resolveDocumentContentType(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'doc':
+        return 'application/msword';
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'png':
+        return 'image/png';
+      case 'webp':
+        return 'image/webp';
+      case 'gif':
+        return 'image/gif';
+      case 'heic':
+        return 'image/heic';
+      case 'heif':
+        return 'image/heif';
+      case 'jpg':
+      case 'jpeg':
+      default:
+        return 'image/jpeg';
+    }
+  }
+
   void addInventoryItem() {
     if (inventoryItemNameController.text.isNotEmpty && inventoryItemQuantityController.text.isNotEmpty) {
       inventoryItems.add({
@@ -2700,7 +3159,7 @@ Powered by Truck Booking App
     tripType.value = 'single';
     selectedLegMode.value = 'loaded_loaded';
     isHazardous.value = false;
-    selectedCurrency.value = 'GHS';
+    selectedCurrency.value = LocalizationController.instance.selectedCurrency.value;
     exchangeRate.value = 1.0;
     baseFee.value = 0.0;
     distanceFee.value = 0.0;
@@ -2728,6 +3187,177 @@ Powered by Truck Booking App
     pickedDocuments.clear();
     editingBookingId.value = '';
     editingCustomBookingId.value = '';
+    bookingCurrentStep.value = 0;
+    estimatedTime.value = '0 mins';
+    suggestedPickupSpots.clear();
+    selectedSuggestedSpot.value = null;
+    suggestedRoutes.clear();
+    selectedRouteIndex.value = 0;
+    bookingFormKey.currentState?.reset();
+  }
+
+  /// Multi-Stage Booking Step Validation & Navigation
+  bool validateBookingStep(int step) {
+    if (step == 0) {
+      final pickupResolved = pickupAddressController.text.trim().isNotEmpty
+          ? pickupAddressController.text.trim()
+          : pickupName.value.trim();
+      final bool hasValidPickup = pickupLocation.value != null &&
+          pickupResolved.isNotEmpty &&
+          pickupResolved != 'Select pickup point' &&
+          pickupResolved != 'Where to?';
+      if (!hasValidPickup) {
+        AvailLoaders.warningSnackBar(
+          title: 'Pickup Location Required',
+          message: 'Please specify and confirm the freight origin/pickup point (Point A).',
+        );
+        return false;
+      }
+
+      final dropoffResolved = dropoffAddressController.text.trim().isNotEmpty
+          ? dropoffAddressController.text.trim()
+          : destinationName.value.trim();
+      final bool hasValidDropoff = destinationLocation.value != null &&
+          dropoffResolved.isNotEmpty &&
+          dropoffResolved != 'Select destination / dropoff' &&
+          dropoffResolved != 'Where to?';
+      if (!hasValidDropoff) {
+        AvailLoaders.warningSnackBar(
+          title: 'Destination Required',
+          message: 'Please specify the freight delivery terminal (Point B).',
+        );
+        return false;
+      }
+      return true;
+    } else if (step == 1) {
+      if (selectedTruckType.value.isEmpty) {
+        AvailLoaders.warningSnackBar(
+          title: 'Truck Selection Required',
+          message: 'Please choose a vehicle type for this manifest.',
+        );
+        return false;
+      }
+      final weight = double.tryParse(weightController.text) ?? loadWeight.value;
+      if (weight <= 0) {
+        AvailLoaders.warningSnackBar(
+          title: 'Weight Required',
+          message: 'Please specify valid cargo payload weight in tons.',
+        );
+        return false;
+      }
+      return true;
+    } else if (step == 2) {
+      if (scheduledDateTime.value != null &&
+          scheduledDateTime.value!.isBefore(DateTime.now().subtract(const Duration(minutes: 5)))) {
+        AvailLoaders.warningSnackBar(
+          title: 'Invalid Schedule Time',
+          message: 'Scheduled dispatch time cannot be in the past.',
+        );
+        return false;
+      }
+      return true;
+    } else if (step == 3) {
+      if (senderNameController.text.trim().isEmpty || senderPhoneController.text.trim().isEmpty) {
+        AvailLoaders.warningSnackBar(
+          title: 'Pickup Contact Required',
+          message: 'Please provide the pickup contact person name and active phone number.',
+        );
+        return false;
+      }
+      if (receiverNameController.text.trim().isEmpty || receiverPhoneController.text.trim().isEmpty) {
+        AvailLoaders.warningSnackBar(
+          title: 'Receiver Contact Required',
+          message: 'Please provide the delivery receiver name and active phone number.',
+        );
+        return false;
+      }
+      return true;
+    }
+    return true;
+  }
+
+  void nextBookingStep() {
+    HapticFeedback.lightImpact();
+    if (!validateBookingStep(bookingCurrentStep.value)) return;
+    if (bookingCurrentStep.value < 3) {
+      bookingCurrentStep.value++;
+      if (dispatchScrollController.hasClients) {
+        dispatchScrollController.animateTo(
+          0.0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+      if (bookingPageController.hasClients) {
+        bookingPageController.animateToPage(
+          bookingCurrentStep.value,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeInOutCubic,
+        );
+      }
+    }
+  }
+
+  void previousBookingStep() {
+    HapticFeedback.lightImpact();
+    if (bookingCurrentStep.value > 0) {
+      bookingCurrentStep.value--;
+      if (dispatchScrollController.hasClients) {
+        dispatchScrollController.animateTo(
+          0.0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+      if (bookingPageController.hasClients) {
+        bookingPageController.animateToPage(
+          bookingCurrentStep.value,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeInOutCubic,
+        );
+      }
+    }
+  }
+
+  void jumpToBookingStep(int targetStep) {
+    if (targetStep == bookingCurrentStep.value) return;
+    HapticFeedback.selectionClick();
+    if (targetStep < bookingCurrentStep.value) {
+      bookingCurrentStep.value = targetStep;
+      if (dispatchScrollController.hasClients) {
+        dispatchScrollController.animateTo(
+          0.0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+      if (bookingPageController.hasClients) {
+        bookingPageController.animateToPage(
+          targetStep,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeInOutCubic,
+        );
+      }
+    } else {
+      for (int i = bookingCurrentStep.value; i < targetStep; i++) {
+        if (!validateBookingStep(i)) return;
+      }
+      bookingCurrentStep.value = targetStep;
+      if (dispatchScrollController.hasClients) {
+        dispatchScrollController.animateTo(
+          0.0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+      if (bookingPageController.hasClients) {
+        bookingPageController.animateToPage(
+          targetStep,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeInOutCubic,
+        );
+      }
+    }
   }
 
   /// Clears form fields only so newly created manifest routes and markers stay rendered on map
@@ -2765,7 +3395,7 @@ Powered by Truck Booking App
     tripType.value = 'single';
     selectedLegMode.value = 'loaded_loaded';
     isHazardous.value = false;
-    selectedCurrency.value = 'GHS';
+    selectedCurrency.value = LocalizationController.instance.selectedCurrency.value;
     exchangeRate.value = 1.0;
     baseFee.value = 0.0;
     distanceFee.value = 0.0;
@@ -2795,8 +3425,10 @@ Powered by Truck Booking App
   void populateForEditing(BookingModel booking) {
     editingBookingId.value = booking.id;
     editingCustomBookingId.value = booking.bookingId;
+    bookingCurrentStep.value = 0;
     selectedCargoType.value = booking.cargoType;
     selectedContainerSize.value = booking.containerSize;
+    containerSizeDisplayController.text = booking.containerSize.isNotEmpty ? 'ISO ${booking.containerSize}' : 'ISO 20ft';
     selectedContainerStatus.value = booking.containerStatus.isNotEmpty ? booking.containerStatus : 'Empty';
     selectedTruckType.value = booking.truckType;
     tripType.value = booking.tripType;
@@ -2804,7 +3436,8 @@ Powered by Truck Booking App
     isHazardous.value = booking.isHazardous;
     selectedCurrency.value = booking.currency;
 
-    weightController.text = booking.weight > 0 ? booking.weight.toString() : '';
+    weightController.text = booking.weight > 0 ? booking.weight.toString() : '2.30';
+    loadWeight.value = booking.weight > 0 ? booking.weight : 2.3;
     loadDescriptionController.text = booking.loadDescription;
     senderNameController.text = booking.senderName;
     senderPhoneController.text = booking.senderPhone;
@@ -2842,19 +3475,273 @@ Powered by Truck Booking App
       'type': ((doc['path'] ?? doc['url'] ?? '').toLowerCase().endsWith('.pdf')) ? 'file' : 'image',
     }).toList());
 
+    estimatedDistance.value = booking.distance > 0 ? '${booking.distance.toStringAsFixed(1)} km' : '0 km';
+    calculatedPrice.value = booking.price;
+
     drawRoute();
+  }
+
+  Future<void> _debugDumpBookingPermissionsAndPayload({
+    required String stage,
+    Map<String, dynamic>? bookingPayload,
+  }) async {
+    try {
+      final authUser = AuthenticationRepository.instance.authUser;
+      final uid = authUser?.uid ?? '';
+      final localUser = UserController.instance.user.value;
+
+      debugPrint('================ [BOOKING DEBUG: $stage] ================');
+      debugPrint('[BOOKING DEBUG] Auth UID        : $uid');
+      debugPrint('[BOOKING DEBUG] Auth Email/Phone: email=${authUser?.email}, phone=${authUser?.phoneNumber}');
+      debugPrint('[BOOKING DEBUG] Local UserModel : id=${localUser.id}, role=${localUser.role}, accountType=${localUser.accountType}, isBusiness=${localUser.isBusiness}');
+      debugPrint('[BOOKING DEBUG] Local Computed  : isVerified=${localUser.isVerified}, isApprovedByAdmin=${localUser.isApprovedByAdmin}, canWork=${localUser.canWork}');
+      debugPrint('[BOOKING DEBUG] Local KYC/KYB   : kycVerified=${localUser.kycVerified}, kycStatus=${localUser.kycStatus}, kycAdmin=${localUser.kycAdminApprovalStatus}, kybVerified=${localUser.kybVerified}, kybStatus=${localUser.kybStatus}, kybAdmin=${localUser.kybAdminApprovalStatus}');
+      debugPrint('[BOOKING DEBUG] Local Didit/Stat: diditVerified=${localUser.diditVerified}, diditStatus=${localUser.diditStatus}, verificationStatus=${localUser.verificationStatus}, adminApprovalStatus=${localUser.adminApprovalStatus}, status=${localUser.status}');
+
+      if (uid.isNotEmpty) {
+        try {
+          final serverUserSnap = await FirebaseFirestore.instance
+              .collection('Users')
+              .doc(uid)
+              .get(const GetOptions(source: Source.serverAndCache));
+          debugPrint('[BOOKING DEBUG] Firestore Users/$uid exists=${serverUserSnap.exists} (fromCache=${serverUserSnap.metadata.isFromCache})');
+          if (serverUserSnap.exists) {
+            final u = serverUserSnap.data() ?? <String, dynamic>{};
+            debugPrint('[BOOKING DEBUG] Firestore Users/$uid raw verification fields: {');
+            for (final key in [
+              'role',
+              'Role',
+              'accountType',
+              'AccountType',
+              'verificationStatus',
+              'VerificationStatus',
+              'adminApprovalStatus',
+              'AdminApprovalStatus',
+              'status',
+              'Status',
+              'isBanned',
+              'isBlocked',
+              'diditVerified',
+              'DiditVerified',
+              'diditStatus',
+              'DiditStatus',
+              'kycVerified',
+              'KycVerified',
+              'kycStatus',
+              'KycStatus',
+              'kycAdminApprovalStatus',
+              'KycAdminApprovalStatus',
+              'kybVerified',
+              'KybVerified',
+              'kybStatus',
+              'KybStatus',
+              'kybAdminApprovalStatus',
+              'KybAdminApprovalStatus',
+              'deletionRequested',
+              'adminApproved',
+              'kycAdminApproved',
+              'kybAdminApproved',
+            ]) {
+              if (u.containsKey(key)) {
+                debugPrint('    $key: ${u[key]} (${u[key].runtimeType})');
+              }
+            }
+            debugPrint('  ALL Users/$uid keys: ${u.keys.toList()}');
+            debugPrint('}');
+
+            // Mirror evaluation of firestore.rules -> isShipperDocEligible(u)
+            final notBanned = u['isBanned'] != true &&
+                u['isBlocked'] != true &&
+                u['status'] != 'banned' &&
+                u['status'] != 'suspended' &&
+                u['status'] != 'blocked';
+            final roleOk = !['driver', 'Driver', 'DRIVER'].contains(u['role']) &&
+                !['driver', 'Driver', 'DRIVER'].contains(u['Role']);
+            final approvedVals = ['approved', 'Approved', 'APPROVED', 'active', 'Active', 'ACTIVE', 'verified', 'Verified', 'VERIFIED'];
+            final verifiedVals = [...approvedVals, 'completed', 'Completed', 'COMPLETED'];
+            final isBusinessType = ['business', 'Business', 'BUSINESS'].contains(u['accountType']) ||
+                ['business', 'Business', 'BUSINESS'].contains(u['AccountType']);
+
+            final generalVerified = verifiedVals.contains(u['verificationStatus']) ||
+                verifiedVals.contains(u['VerificationStatus']) ||
+                u['diditVerified'] == true ||
+                u['DiditVerified'] == true ||
+                verifiedVals.contains(u['diditStatus']) ||
+                verifiedVals.contains(u['DiditStatus']) ||
+                u['kycVerified'] == true ||
+                u['KycVerified'] == true ||
+                verifiedVals.contains(u['kycStatus']) ||
+                verifiedVals.contains(u['KycStatus']) ||
+                u['kybVerified'] == true ||
+                u['KybVerified'] == true ||
+                verifiedVals.contains(u['kybStatus']) ||
+                verifiedVals.contains(u['KybStatus']);
+
+            final generalApproved = approvedVals.contains(u['adminApprovalStatus']) ||
+                approvedVals.contains(u['AdminApprovalStatus']) ||
+                approvedVals.contains(u['kycAdminApprovalStatus']) ||
+                approvedVals.contains(u['KycAdminApprovalStatus']) ||
+                approvedVals.contains(u['kybAdminApprovalStatus']) ||
+                approvedVals.contains(u['KybAdminApprovalStatus']) ||
+                ['active', 'Active', 'ACTIVE', 'approved', 'Approved', 'APPROVED'].contains(u['status']) ||
+                ['active', 'Active', 'ACTIVE', 'approved', 'Approved', 'APPROVED'].contains(u['Status']);
+
+            debugPrint('[BOOKING DEBUG] Server Rule Check (Users/$uid): notBanned=$notBanned, roleOk=$roleOk, isBusinessType=$isBusinessType, generalVerified=$generalVerified, generalApproved=$generalApproved');
+            if (!notBanned || !roleOk || !generalVerified || !generalApproved) {
+              debugPrint('[BOOKING DEBUG] ⚠️ WARNING: Server Users/$uid may FAIL isShipperDocEligible in firestore.rules!');
+            } else {
+              debugPrint('[BOOKING DEBUG] ✅ Server Users/$uid PASSES isShipperDocEligible check!');
+            }
+          }
+        } catch (e) {
+          debugPrint('[BOOKING DEBUG] ⚠️ Failed to inspect Firestore Users/$uid: $e');
+        }
+      }
+
+      if (bookingPayload != null) {
+        for (final entry in bookingPayload.entries) {
+          debugPrint('[BOOKING DEBUG FIELD] ${entry.key} = ${entry.value} (${entry.value.runtimeType})');
+        }
+        final allowedKeys = <String>{
+          'id', 'userId', 'bookingId', 'cargoType', 'containerSize', 'containerStatus',
+          'loadDescription', 'senderName', 'senderPhone', 'receiverName', 'receiverPhone',
+          'status', 'timestamp', 'documents', 'truckType', 'price',
+          'pickupAddress', 'dropoffAddress', 'weight', 'distance',
+          'pickupLocation', 'dropoffLocation',
+          'isFragile', 'isInsured', 'requiresLoadingAssistance', 'isHazardous',
+          'tripType', 'roundTripLegMode', 'journeyCategory',
+          'containerDeckSurcharge', 'emptyReturnDiscount', 'excessWeightFee',
+          'specialSurcharges', 'roadAllowance', 'overnightAllowance', 'fragileBonus',
+          'loadingLaborFee', 'driverEarnings', 'platformFee', 'currency',
+          'scheduledDate', 'cargoValue', 'paymentMethod', 'initialPaymentMethod',
+          'paymentStatus', 'paidOnline', 'paymentReference', 'paymentChannel',
+          'paymentNetwork', 'paymentPhone', 'paidAmountGhs', 'paidAmountUsd',
+          'paidByUserId', 'paidAt', 'driverPayoutStatus',
+          'driverId', 'driver_id', 'assignedDriverId', 'assignedTruckId',
+          'companyId', 'companyName', 'driverName', 'driverPhone',
+          'vehiclePlate', 'vehicleModel', 'driverRating',
+          'driverLocation', 'driverHeading', 'driverBearing', 'lastUpdated',
+          'chatSessionId', 'inventory', 'stops', 'updatedAt', 'createdAt',
+          'lastDriverCancelledAt', 'driverCancellationCount', 'driver',
+          'refundStatus', 'refundReference', 'refundAmountUsd', 'refundAmountGhs',
+          'refundMethod', 'refundAccount', 'refundAccountName', 'refundFailureReason', 'refundedAt'
+        };
+
+        final unexpectedKeys = bookingPayload.keys.where((k) => !allowedKeys.contains(k)).toList();
+        debugPrint('[BOOKING DEBUG] Payload keys count=${bookingPayload.keys.length}, unexpectedKeys=$unexpectedKeys');
+
+        final violations = <String>[];
+        if (unexpectedKeys.isNotEmpty) {
+          violations.add('Unexpected keys not in isValidShipperBookingPayload: $unexpectedKeys');
+        }
+        if (bookingPayload['userId'] != uid) {
+          violations.add('userId (${bookingPayload['userId']}) != auth.uid ($uid)');
+        }
+        if (bookingPayload['bookingId'] is! String || (bookingPayload['bookingId'] as String).isEmpty || (bookingPayload['bookingId'] as String).length > 80) {
+          violations.add('Invalid bookingId: ${bookingPayload['bookingId']}');
+        }
+        if (bookingPayload['pickupAddress'] is! String || (bookingPayload['pickupAddress'] as String).isEmpty || (bookingPayload['pickupAddress'] as String).length > 500) {
+          violations.add('Invalid pickupAddress (len=${(bookingPayload['pickupAddress'] as String?)?.length}): "${bookingPayload['pickupAddress']}"');
+        }
+        if (bookingPayload['dropoffAddress'] is! String || (bookingPayload['dropoffAddress'] as String).isEmpty || (bookingPayload['dropoffAddress'] as String).length > 500) {
+          violations.add('Invalid dropoffAddress (len=${(bookingPayload['dropoffAddress'] as String?)?.length}): "${bookingPayload['dropoffAddress']}"');
+        }
+        if (bookingPayload['truckType'] is! String || (bookingPayload['truckType'] as String).isEmpty || (bookingPayload['truckType'] as String).length > 100) {
+          violations.add('Invalid truckType: "${bookingPayload['truckType']}"');
+        }
+        if (bookingPayload['cargoType'] is! String || (bookingPayload['cargoType'] as String).isEmpty || (bookingPayload['cargoType'] as String).length > 120) {
+          violations.add('Invalid cargoType: "${bookingPayload['cargoType']}"');
+        }
+        final price = bookingPayload['price'];
+        if (price is! num || price.isNaN || price.isInfinite || price <= 0 || price > 10000000) {
+          violations.add('Invalid price (must be > 0 and <= 10000000): $price');
+        }
+        for (final numKey in [
+          'weight', 'distance', 'cargoValue', 'containerDeckSurcharge',
+          'emptyReturnDiscount', 'excessWeightFee', 'specialSurcharges',
+          'roadAllowance', 'loadingLaborFee', 'platformFee', 'driverEarnings'
+        ]) {
+          final val = bookingPayload[numKey];
+          if (val != null && (val is! num || val.isNaN || val.isInfinite || val < 0)) {
+            violations.add('Invalid numeric field $numKey: $val');
+          }
+        }
+        if (!['single', 'round_trip', 'Single', 'Round Trip'].contains(bookingPayload['tripType'])) {
+          violations.add('Invalid tripType (must be in [single, round_trip, Single, Round Trip]): "${bookingPayload['tripType']}"');
+        }
+        for (final strLimit in <String, int>{
+          'id': 128,
+          'bookingId': 80,
+          'cargoType': 100,
+          'containerSize': 60,
+          'containerStatus': 80,
+          'loadDescription': 2000,
+          'senderName': 120,
+          'senderPhone': 50,
+          'receiverName': 120,
+          'receiverPhone': 50,
+          'truckType': 100,
+          'pickupAddress': 500,
+          'dropoffAddress': 500,
+          'roundTripLegMode': 60,
+          'journeyCategory': 120,
+          'currency': 15,
+          'paymentMethod': 80,
+          'initialPaymentMethod': 80,
+          'chatSessionId': 160,
+          'timestamp': 60,
+          'scheduledDate': 60,
+        }.entries) {
+          final val = bookingPayload[strLimit.key];
+          if (val != null && (val is! String || val.length > strLimit.value)) {
+            violations.add('Field ${strLimit.key} exceeds max length ${strLimit.value} or not String: len=${val is String ? val.length : val.runtimeType}, val="$val"');
+          }
+        }
+
+        if (violations.isEmpty) {
+          debugPrint('[BOOKING DEBUG] ✅ Booking payload PASSES all isValidShipperBookingCreate checks locally!');
+        } else {
+          for (final v in violations) {
+            debugPrint('[BOOKING DEBUG] ❌ PAYLOAD RULE VIOLATION: $v');
+          }
+        }
+
+        debugPrint('[BOOKING DEBUG] Full payload summary: '
+            'bookingId=${bookingPayload['bookingId']}, '
+            'status=${bookingPayload['status']}, '
+            'paymentStatus=${bookingPayload['paymentStatus']}, '
+            'price=${bookingPayload['price']}, '
+            'weight=${bookingPayload['weight']}, '
+            'distance=${bookingPayload['distance']}, '
+            'pickupAddress="${bookingPayload['pickupAddress']}", '
+            'dropoffAddress="${bookingPayload['dropoffAddress']}", '
+            'truckType="${bookingPayload['truckType']}", '
+            'cargoType="${bookingPayload['cargoType']}", '
+            'stops=${(bookingPayload['stops'] as List?)?.length}, '
+            'inventory=${(bookingPayload['inventory'] as List?)?.length}, '
+            'documents=${(bookingPayload['documents'] as List?)?.length}');
+      }
+      debugPrint('================================================================');
+    } catch (e, stack) {
+      debugPrint('[BOOKING DEBUG] Error inside _debugDumpBookingPermissionsAndPayload: $e\n$stack');
+    }
   }
 
   Future<void> saveBooking() async {
     try {
+      debugPrint('[BOOKING DEBUG] >>> saveBooking() triggered (editingBookingId="${editingBookingId.value}")');
+      await _debugDumpBookingPermissionsAndPayload(stage: 'START');
+
       // 1. Mandatory Gatekeeper: Ensure Shipper is identity-verified AND approved by admin
       if (!checkShipperVerificationAndApproval()) {
+        debugPrint('[BOOKING DEBUG] ❌ Blocked at Step 1: checkShipperVerificationAndApproval() returned false');
         return;
       }
 
       AvailFullScreenLoader.openLoadingDialog('Processing your booking & uploading files...', 'assets/images/animations/loader-animation.json');
 
       if (!bookingFormKey.currentState!.validate()) {
+        debugPrint('[BOOKING DEBUG] ❌ Blocked at Step 1b: bookingFormKey.currentState!.validate() returned false');
         AvailFullScreenLoader.stopLoading();
         return;
       }
@@ -2863,22 +3750,26 @@ Powered by Truck Booking App
 
       if (editingBookingId.value.isEmpty || customBookingId.isEmpty) {
         try {
+          debugPrint('[BOOKING DEBUG] Step 2: Generating customBookingId via IdGenerator.generate(prefix: FT-)...');
           customBookingId = await IdGenerator.generate(
             prefix: 'FT-',
             includeYear: true,
             includeMonth: true,
             includeDay: true,
           );
+          debugPrint('[BOOKING DEBUG] ✅ Step 2: IdGenerator generated customBookingId=$customBookingId');
         } catch (e) {
           final now = DateTime.now();
           final dateStr = DateFormat('yyMMdd').format(now);
           final randomNum = (1000 + (now.millisecondsSinceEpoch % 9000)).toString();
           customBookingId = 'FT-$dateStr-$randomNum';
+          debugPrint('[BOOKING DEBUG] ⚠️ Step 2: IdGenerator failed ($e) -> using fallback customBookingId=$customBookingId');
         }
       }
 
       // Sync and upload picked documents to Firebase Storage
       final List<Map<String, String>> uploadedDocuments = [];
+      debugPrint('[BOOKING DEBUG] Step 3: Processing ${pickedDocuments.length} picked documents...');
       for (int i = 0; i < pickedDocuments.length; i++) {
         final doc = pickedDocuments[i];
         final name = (doc['name'] as String? ?? '').trim();
@@ -2890,9 +3781,19 @@ Powered by Truck Booking App
           if (file.existsSync()) {
             try {
               final docName = name.isNotEmpty ? name : 'doc_${i + 1}';
-              final extension = path.contains('.') ? path.split('.').last : 'jpg';
+              final extension = path.contains('.')
+                  ? path.split('.').last.toLowerCase()
+                  : 'jpg';
               final sanitizedName = docName.replaceAll(RegExp(r'[^\w.]'), '_');
-              final fileName = '${DateTime.now().millisecondsSinceEpoch}_${i}_$sanitizedName.$extension';
+              final suffix = sanitizedName.toLowerCase().endsWith('.$extension')
+                  ? ''
+                  : '.$extension';
+              final fileName =
+                  '${DateTime.now().millisecondsSinceEpoch}_${i}_$sanitizedName$suffix';
+              final contentType = _resolveDocumentContentType(extension);
+              final fileSize = file.lengthSync();
+
+              debugPrint('[BOOKING DEBUG] Step 3.${i + 1}: Uploading to Storage path="booking_documents/$customBookingId/$fileName" (size=$fileSize bytes, contentType=$contentType)...');
 
               final ref = FirebaseStorage.instance
                   .ref()
@@ -2900,11 +3801,21 @@ Powered by Truck Booking App
                   .child(customBookingId)
                   .child(fileName);
 
-              await ref.putFile(file);
+              await ref.putFile(
+                file,
+                SettableMetadata(
+                  contentType: contentType,
+                ),
+              );
               url = await ref.getDownloadURL();
-            } catch (e) {
-              debugPrint('Error uploading document to Firebase Storage: $e');
+              debugPrint('[BOOKING DEBUG] ✅ Step 3.${i + 1}: Uploaded document URL=$url');
+            } on FirebaseException catch (e, stack) {
+              debugPrint('[BOOKING DEBUG] ❌ Step 3.${i + 1}: FirebaseStorage upload FirebaseException: code=${e.code}, message=${e.message}, plugin=${e.plugin}\n$stack');
+            } catch (e, stack) {
+              debugPrint('[BOOKING DEBUG] ❌ Step 3.${i + 1}: Error uploading document to Firebase Storage: $e\n$stack');
             }
+          } else {
+            debugPrint('[BOOKING DEBUG] ⚠️ Step 3.${i + 1}: Local file does not exist at path="$path"');
           }
         } else if (url.isEmpty && path.startsWith('http')) {
           url = path;
@@ -3015,32 +3926,65 @@ Powered by Truck Booking App
         documents: uploadedDocuments,
       );
 
-      if (editingBookingId.value.isNotEmpty) {
+      await _debugDumpBookingPermissionsAndPayload(
+        stage: 'BEFORE_FIRESTORE_WRITE',
+        bookingPayload: booking.toJson(),
+      );
+
+      final bool wasEditing = editingBookingId.value.isNotEmpty;
+
+      if (wasEditing) {
+        debugPrint('[BOOKING DEBUG] Step 4: Calling BookingRepository.updateBooking(${booking.id})...');
         await BookingRepository.instance.updateBooking(booking);
         AvailFullScreenLoader.stopLoading();
         AvailLoaders.successSnackBar(title: 'Manifest Updated', message: 'The freight manifest has been updated successfully.');
       } else {
+        debugPrint('[BOOKING DEBUG] Step 4: Calling BookingRepository.saveBooking()...');
         final savedId = await BookingRepository.instance.saveBooking(booking);
         booking.id = savedId;
+        debugPrint('[BOOKING DEBUG] ✅ Step 4: Booking saved with docId=$savedId');
         AvailFullScreenLoader.stopLoading();
         AvailLoaders.successSnackBar(title: 'Success', message: 'Your booking has been saved and documents synced.');
       }
 
-      clearFormFieldsOnly();
+      // 1. Fully reset form fields, stage wizard, and editing identifiers
+      resetForm();
+
+      // 2. Immediately close any open subScreen (e.g. JobDispatchScreen or Edit Manifest)
       if (Get.isRegistered<NavigationController>()) {
-        NavigationController.instance.selectedIndex.value = 0;
+        NavigationController.instance.closeSubScreen();
+        if (!wasEditing) {
+          NavigationController.instance.selectedIndex.value = 0;
+        }
       }
+
+      // 3. Close open sheets or overlays
       if (Get.isOverlaysOpen) {
         Get.back(closeOverlays: true);
       }
-      Get.until((route) => route.isFirst || route.settings.name == '/NavigationMenu');
 
-      // Immediately display and draw the newly created manifest on the home map!
-      Future.delayed(const Duration(milliseconds: 350), () {
-        showJobOnMap(booking);
-      });
+      // 4. Pop any pushed JobDispatchScreen route cleanly
+      if (Get.currentRoute == AvailRoutes.jobDispatch && (Get.context != null && Navigator.of(Get.context!).canPop())) {
+        Navigator.of(Get.context!).pop();
+      }
 
-    } catch (e) {
+      // 5. Restore home map controller
+      if (homeMapController != null) {
+        mapController = homeMapController;
+      }
+
+      // 6. Display and track active job on map
+      if (!wasEditing || selectedJobOnMap.value?.id == booking.id) {
+        Future.delayed(const Duration(milliseconds: 350), () {
+          showJobOnMap(booking);
+        });
+      }
+
+    } catch (e, stack) {
+      debugPrint('============================================================');
+      debugPrint('[BOOKING DEBUG] ❌ saveBooking() CAUGHT EXCEPTION: $e');
+      debugPrint('[BOOKING DEBUG] StackTrace:\n$stack');
+      debugPrint('============================================================');
       AvailFullScreenLoader.stopLoading();
       AvailLoaders.errorSnackBar(title: 'Oh Snap!', message: e.toString());
     }

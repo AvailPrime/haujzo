@@ -202,6 +202,12 @@ class RouteDataModel {
     }
   }
 
+  /// The exact first vertex on the drivable road network (where vehicle pulls up)
+  LatLng get roadOrigin => points.isNotEmpty ? points.first : origin;
+
+  /// The exact final vertex on the drivable road network (where vehicle unloads)
+  LatLng get roadDestination => points.isNotEmpty ? points.last : destination;
+
   RouteDataModel copyWith({
     List<LatLng>? points,
     double? distanceKm,
@@ -745,31 +751,9 @@ class SmartRoutingEngine {
       points.addAll(decoded.map((p) => LatLng(p.latitude, p.longitude)));
     }
 
-    // Seamless Endpoint Snapping: Guarantee the polyline starts at origin and ends at destination
-    // Connects 100% cleanly without floating gaps, even if pins are located inside compounds/ports off-road.
-    if (points.isNotEmpty) {
-      final double distToOrigin = Geolocator.distanceBetween(
-        origin.latitude, origin.longitude,
-        points.first.latitude, points.first.longitude,
-      );
-      if (distToOrigin > 1.5) {
-        points.insert(0, origin);
-        if (trafficSegments.isNotEmpty && trafficSegments.first.points.isNotEmpty) {
-          trafficSegments.first.points.insert(0, origin);
-        }
-      }
-
-      final double distToDest = Geolocator.distanceBetween(
-        destination.latitude, destination.longitude,
-        points.last.latitude, points.last.longitude,
-      );
-      if (distToDest > 1.5) {
-        points.add(destination);
-        if (trafficSegments.isNotEmpty && trafficSegments.last.points.isNotEmpty) {
-          trafficSegments.last.points.add(destination);
-        }
-      }
-    }
+    // Professional Paved-Road Adherence:
+    // Road polyline remains 100% on the drivable road network without artificial diagonal lines
+    // cutting through buildings, compounds, or fences. Markers sit flush on roadOrigin / roadDestination.
 
     // Fallback single segment if steps gave no segmented traffic
     final int totalTrafficDelay = legDelaySeconds > 0
@@ -929,26 +913,7 @@ class SmartRoutingEngine {
       return LatLng(lat, lng);
     }).toList();
 
-    // Seamless Endpoint Snapping: Guarantee the OSRM route starts at origin and ends at destination
-    // Connects 100% cleanly without floating gaps, even if pins are located inside compounds/ports off-road.
-    if (points.isNotEmpty) {
-      final double distToOrigin = Geolocator.distanceBetween(
-        origin.latitude, origin.longitude,
-        points.first.latitude, points.first.longitude,
-      );
-      if (distToOrigin > 1.5) {
-        points.insert(0, origin);
-      }
-
-      final double distToDest = Geolocator.distanceBetween(
-        destination.latitude, destination.longitude,
-        points.last.latitude, points.last.longitude,
-      );
-      if (distToDest > 1.5) {
-        points.add(destination);
-      }
-    }
-
+    // Professional Paved-Road Adherence: OSRM route points strictly follow genuine street geometry
     final distanceMeters = (route['distance'] as num?)?.toDouble() ?? 0.0;
     final durationSeconds = (route['duration'] as num?)?.toDouble() ?? 0.0;
 
@@ -1377,6 +1342,65 @@ class SmartRoutingEngine {
     }
 
     return polylines;
+  }
+
+  /// Builds clean, subtle dashed access connector lines for off-road facilities / compounds (Uber style)
+  Set<Polyline> buildAccessConnectors({
+    required LatLng origin,
+    required LatLng destination,
+    required List<LatLng> roadPoints,
+    Color pickupColor = const Color(0xFF10B981),
+    Color dropoffColor = const Color(0xFFEF4444),
+    double width = 2.4,
+  }) {
+    final Set<Polyline> connectors = {};
+    if (roadPoints.isEmpty) return connectors;
+
+    final roadStart = roadPoints.first;
+    final roadEnd = roadPoints.last;
+
+    // Only add connector if physical location is distinct from road (> 15m and < 1500m)
+    final distOrigin = Geolocator.distanceBetween(
+      origin.latitude, origin.longitude,
+      roadStart.latitude, roadStart.longitude,
+    );
+    if (distOrigin > 15.0 && distOrigin < 1500.0) {
+      connectors.add(
+        Polyline(
+          polylineId: const PolylineId('pickup_access_connector'),
+          points: [origin, roadStart],
+          width: width.round().clamp(2, 3),
+          color: pickupColor.withValues(alpha: 0.70),
+          patterns: [PatternItem.dash(10), PatternItem.gap(6)],
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+          geodesic: false,
+          zIndex: 8,
+        ),
+      );
+    }
+
+    final distDest = Geolocator.distanceBetween(
+      destination.latitude, destination.longitude,
+      roadEnd.latitude, roadEnd.longitude,
+    );
+    if (distDest > 15.0 && distDest < 1500.0) {
+      connectors.add(
+        Polyline(
+          polylineId: const PolylineId('dropoff_access_connector'),
+          points: [roadEnd, destination],
+          width: width.round().clamp(2, 3),
+          color: dropoffColor.withValues(alpha: 0.70),
+          patterns: [PatternItem.dash(10), PatternItem.gap(6)],
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+          geodesic: false,
+          zIndex: 8,
+        ),
+      );
+    }
+
+    return connectors;
   }
 
   /// High-Definition Multi-Route Polylines with Interactive Alternatives

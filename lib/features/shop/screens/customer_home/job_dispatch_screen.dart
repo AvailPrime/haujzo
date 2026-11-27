@@ -6,7 +6,6 @@ import 'package:truck_booking/commons/widgets/appBar/appbar.dart';
 import 'package:truck_booking/commons/widgets/layouts/app_page_layout.dart';
 import 'package:truck_booking/commons/widgets/layouts/site_layout.dart';
 import 'package:truck_booking/features/personalization/controllers/user_controller.dart';
-import 'package:truck_booking/features/personalization/screens/verification/didit_verification_screen.dart';
 import 'package:truck_booking/features/shop/controllers/customer/customer_home_controller.dart';
 import 'package:truck_booking/utils/constants/colors.dart';
 import 'package:truck_booking/utils/constants/sizes.dart';
@@ -31,6 +30,9 @@ class JobDispatchScreen extends StatelessWidget {
         onPopInvokedWithResult: (didPop, result) {
           if (didPop) {
             controller.mapController = controller.homeMapController;
+            if (controller.editingBookingId.value.isNotEmpty) {
+              controller.resetForm();
+            }
           }
         },
         child: Scaffold(
@@ -43,6 +45,9 @@ class JobDispatchScreen extends StatelessWidget {
                   backArrowColor: Colors.white,
                   leadingOnPressed: () {
                     controller.mapController = controller.homeMapController;
+                    if (controller.editingBookingId.value.isNotEmpty) {
+                      controller.resetForm();
+                    }
                     if (Get.isRegistered<NavigationController>() &&
                         NavigationController.instance.subScreen.value != null) {
                       NavigationController.instance.closeSubScreen();
@@ -53,15 +58,17 @@ class JobDispatchScreen extends StatelessWidget {
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'DISPATCH CARGO JOB',
-                style: TextStyle(
+              Obx(() => Text(
+                controller.editingBookingId.value.isNotEmpty
+                    ? 'EDIT FREIGHT MANIFEST'
+                    : 'DISPATCH CARGO JOB',
+                style: const TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 1.2,
                   color: Colors.white,
                 ),
-              ),
+              )),
               Obx(
                 () => Text(
                   controller.estimatedDistance.value != '0 km'
@@ -111,6 +118,7 @@ class JobDispatchScreen extends StatelessWidget {
             final isSplit = constraints.maxWidth >= 960;
 
             return SingleChildScrollView(
+              controller: controller.dispatchScrollController,
               padding: EdgeInsets.symmetric(
                 horizontal: isSplit ? 24 : 0,
                 vertical: isSplit ? 20 : 0,

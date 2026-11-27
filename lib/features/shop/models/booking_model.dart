@@ -62,6 +62,7 @@ class BookingModel {
   String? driverId;
   String? driverName;
   String? driverPhone;
+  String? driverImage;
   String? vehiclePlate;
   String? vehicleModel;
   double? driverRating;
@@ -159,6 +160,7 @@ class BookingModel {
     this.driverId,
     this.driverName,
     this.driverPhone,
+    this.driverImage,
     this.vehiclePlate,
     this.vehicleModel,
     this.driverRating,
@@ -197,6 +199,28 @@ class BookingModel {
     final clean = status.toLowerCase().trim();
     return clean == 'cancelled' || clean == 'canceled';
   }
+
+  bool get isCompleted {
+    final clean = status.toLowerCase().trim();
+    return clean == 'delivered' || clean == 'completed';
+  }
+
+  bool get isClosed => isCompleted || isCancelled;
+
+  bool get isUnassigned {
+    final clean = status.toLowerCase().trim().replaceAll(RegExp(r'[^a-z]'), '');
+    final hasDriver = (driverId ?? '').trim().isNotEmpty;
+    return !hasDriver &&
+        (clean == 'pending' ||
+            clean == 'available' ||
+            clean == 'open' ||
+            clean == 'unassigned');
+  }
+
+  /// Live chat & direct driver call are only allowed while a booking is active
+  /// and tied to an assigned driver (blocked once completed, cancelled, or unassigned).
+  bool get canChatWithDriver =>
+      !isClosed && !isUnassigned && (driverId ?? '').trim().isNotEmpty;
 
   /// Shipper may cancel directly only before cargo is picked up / loaded onto truck
   bool get canShipperCancelDirectly {
@@ -276,6 +300,7 @@ class BookingModel {
       'driverId': driverId,
       'driverName': driverName,
       'driverPhone': driverPhone,
+      if (driverImage != null && driverImage!.isNotEmpty) 'driverImage': driverImage,
       'vehiclePlate': vehiclePlate,
       'vehicleModel': vehicleModel,
       'driverRating': driverRating,
@@ -377,6 +402,14 @@ class BookingModel {
         driverId: data['driverId'],
         driverName: data['driverName'],
         driverPhone: data['driverPhone'],
+        driverImage: (data['driverImage'] ??
+                data['driverProfilePicture'] ??
+                data['driverPhotoUrl'] ??
+                (data['driver'] is Map
+                    ? (data['driver']['profilePicture'] ?? data['driver']['image'])
+                    : null) ??
+                '')
+            .toString(),
         vehiclePlate: data['vehiclePlate'],
         vehicleModel: data['vehicleModel'],
         driverRating: (data['driverRating'] ?? 0.0).toDouble(),

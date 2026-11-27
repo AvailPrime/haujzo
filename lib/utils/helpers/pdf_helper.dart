@@ -1,21 +1,30 @@
-import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:intl/intl.dart';
+import '../../utils/constants/image_strings.dart';
+import '../../utils/constants/text_strings.dart';
+import '../../features/personalization/controllers/localization_controller.dart';
 import '../../features/shop/models/booking_model.dart';
 
 class AvailPdfHelper {
   static Future<void> generateAndShareWaybill(BookingModel booking) async {
     final pdf = pw.Document();
 
-    final String bookingId = booking.bookingId;
-    String displayId = "FT-";
-    if (bookingId.length >= 8) {
-      displayId += "${bookingId.substring(0, 4)}-${bookingId.substring(4, 8)}".toUpperCase();
-    } else {
-      displayId += bookingId.toUpperCase();
+    final String rawId = booking.bookingId.isNotEmpty ? booking.bookingId.trim() : booking.id.trim();
+    String displayId = rawId.toUpperCase();
+    if (!displayId.startsWith('FT')) {
+      displayId = 'FT-$displayId';
+    }
+
+    // Load official app logo for header branding
+    pw.MemoryImage? logoImage;
+    try {
+      final logoBytes = await rootBundle.load(AvailImages.appLogo);
+      logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
+    } catch (e) {
+      // In case image asset fails to load, gracefully proceed without it
     }
 
     pdf.addPage(
@@ -23,7 +32,7 @@ class AvailPdfHelper {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(32),
         build: (context) => [
-          _buildHeader(displayId, booking.timestamp),
+          _buildHeader(displayId, booking.timestamp, logoImage),
           pw.SizedBox(height: 20),
           _buildContactSection(booking),
           pw.SizedBox(height: 20),
@@ -47,15 +56,34 @@ class AvailPdfHelper {
     await Printing.sharePdf(bytes: await pdf.save(), filename: 'Waybill_$displayId.pdf');
   }
 
-  static pw.Widget _buildHeader(String id, DateTime date) {
+  static pw.Widget _buildHeader(String id, DateTime date, pw.MemoryImage? logoImage) {
     return pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: pw.CrossAxisAlignment.center,
       children: [
-        pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
           children: [
-            pw.Text('CLASSIC FREIGHT LOGISTICS', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
-            pw.Text('Professional Haulage & Manifest System', style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey)),
+            if (logoImage != null) ...[
+              pw.Container(
+                width: 44,
+                height: 44,
+                margin: const pw.EdgeInsets.only(right: 12),
+                child: pw.Image(logoImage, fit: pw.BoxFit.contain),
+              ),
+            ],
+            pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text('${AvailTexts.appName.toUpperCase()} LOGISTICS',
+                    style: pw.TextStyle(
+                        fontSize: 18,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.blue900)),
+                pw.Text('Professional Freight Haulage & Manifest System',
+                    style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+              ],
+            ),
           ],
         ),
         pw.Column(
@@ -158,6 +186,10 @@ class AvailPdfHelper {
 
   static pw.Widget _buildPricingSection(BookingModel booking) {
     final isPaidOnline = booking.isPaidOnline;
+    final displayCurrency =
+        booking.currency.trim().isNotEmpty ? booking.currency.trim().toUpperCase() : 'GHS';
+    final formattedTotal = LocalizationController.instance
+        .formatPriceForCurrency(booking.price, displayCurrency);
     return pw.Container(
       padding: const pw.EdgeInsets.all(12),
       decoration: const pw.BoxDecoration(color: PdfColors.grey50),
@@ -167,8 +199,8 @@ class AvailPdfHelper {
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
-              pw.Text('TOTAL HAULAGE RATE (${booking.currency})', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
-              pw.Text('${booking.currency} ${booking.price.toStringAsFixed(2)}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14, color: PdfColors.blue800)),
+              pw.Text('TOTAL HAULAGE RATE ($displayCurrency)', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
+              pw.Text(formattedTotal, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14, color: PdfColors.blue800)),
             ],
           ),
           pw.SizedBox(height: 6),
@@ -247,7 +279,7 @@ class AvailPdfHelper {
         pw.SizedBox(height: 10),
         pw.Divider(thickness: 0.5, color: PdfColors.grey300),
         pw.Center(
-          child: pw.Text('Generated by Classic Freight Logistics Manifest System', style: const pw.TextStyle(fontSize: 6, color: PdfColors.grey)),
+          child: pw.Text('Generated by ${AvailTexts.appName} Freight Logistics Manifest System', style: const pw.TextStyle(fontSize: 6, color: PdfColors.grey)),
         ),
       ],
     );
