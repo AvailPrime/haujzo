@@ -61,9 +61,7 @@ class AvailAppTheme {
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: {
         TargetPlatform.android: AvailPageTransitionsBuilder(),
-        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
         TargetPlatform.windows: AvailPageTransitionsBuilder(),
-        TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
         TargetPlatform.linux: AvailPageTransitionsBuilder(),
       },
     ),
@@ -87,9 +85,7 @@ class AvailAppTheme {
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: {
         TargetPlatform.android: AvailPageTransitionsBuilder(),
-        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
         TargetPlatform.windows: AvailPageTransitionsBuilder(),
-        TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
         TargetPlatform.linux: AvailPageTransitionsBuilder(),
       },
     ),
